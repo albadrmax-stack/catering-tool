@@ -1,4 +1,6 @@
 streamlit
-pdfplumber
 pandas
+pdfplumber
 xlsxwriter
+paddleocr
+paddlepaddle

@@ -13,17 +13,17 @@ if uploaded_files:
     all_data = []
     for uploaded_file in uploaded_files:
         with pdfplumber.open(uploaded_file) as pdf:
-            # محاولة استخراج اسم المورد (شركة الخامة الأولية) [cite: 1, 12]
             text_full = ""
             for p in pdf.pages:
                 text_full += p.extract_text() or ""
             
-            vendor = "شركة الخامة الأولية" if "الخامة" in text_full else "مورد غير معروف" [cite: 1]
+            # تحديد اسم المورد
+            vendor = "شركة الخامة الأولية" if "الخامة" in text_full else "مورد غير معروف"
 
             for page in pdf.pages:
                 lines = page.extract_text().split('\n')
                 for line in lines:
-                    # هذا النمط يبحث عن (رقم الصنف 5 أرقام + الوحدة + الكمية + السعر) 
+                    # البحث عن (رقم الصنف + البيان + الوحدة + الكمية + السعر)
                     match = re.search(r'(\d{5})\s+(.*?)\s+(كرتون|كيلو|تلك|حبة|باكيت)\s+(\d+)\s+([\d\.,]+)', line)
                     if match:
                         all_data.append({

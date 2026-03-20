@@ -2,6 +2,6 @@ streamlit
 pandas
 pdfplumber
 pytesseract
-Pillow
 pdf2image
+Pillow
 xlsxwriter

@@ -1,6 +1,5 @@
 streamlit
 pandas
-pdfplumber
 xlsxwriter
-pytesseract
-pdf2image
+pdfplumber
+google-generativeai

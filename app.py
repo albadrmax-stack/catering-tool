@@ -2,39 +2,48 @@ import streamlit as st
 import pandas as pd
 import pdfplumber
 import io
+import re
 
-st.set_page_config(page_title="نظام جرد الإعاشة الموحد", layout="wide")
-st.title("📂 مستخرج بيانات فواتير الإعاشة الموحد")
+st.set_page_config(page_title="مستخرج فواتير الخامة الأولية", layout="wide")
+st.title("📂 نظام استخراج بيانات فواتير الإعاشة المطور")
 
-uploaded_files = st.file_uploader("(PDF الأصلي) ارفع فواتيرك", type="pdf", accept_multiple_files=True)
+uploaded_files = st.file_uploader("ارفع فواتيرك هنا (PDF)", type="pdf", accept_multiple_files=True)
 
 if uploaded_files:
     all_data = []
-    for uploaded_file in uploaded_files:
-        with pdfplumber.open(uploaded_file) as pdf:
-            # محاولة قراءة النص
-            first_page_text = pdf.pages[0].extract_text()
-            vendor = "مورد غير معروف"
-            if first_page_text:
-                vendor = first_page_text.split('\n')[0]
+    for file in uploaded_files:
+        with pdfplumber.open(file) as pdf:
+            # استخراج اسم العميل (أزواد مثلاً)
+            full_text = ""
+            for p in pdf.pages:
+                full_text += p.extract_text() or ""
             
+            # محاولة العثور على اسم المورد (شركة الخامة الأولية)
+            vendor_match = re.search(r"شركة\s+(.+?)\s+للتجارة", full_text)
+            vendor = vendor_match.group(0) if vendor_match else "شركة الخامة الأولية"
+
             for page in pdf.pages:
-                table = page.extract_table()
-                if table:
-                    df_page = pd.DataFrame(table)
-                    df_page.dropna(how='all', inplace=True)
-                    for index, row in df_page.iterrows():
-                        if any(row):
-                            all_data.append([vendor] + list(row))
+                rows = page.extract_text().split('\n')
+                for row in rows:
+                    # نمط للبحث عن الأسطر التي تبدأ برقم صنف وتتبعها بيانات
+                    # مثل: 00098 ورق عنب محشي ... كرتون 50 115.0
+                    match = re.search(r"(\d{5})\s+(.*?)\s+(كرتون|كيلو|حبة|تلك|ربطة)\s+(\d+)\s+([\d\.]+)", row)
+                    if match:
+                        item_no = match.group(1)
+                        desc = match.group(2)
+                        unit = match.group(3)
+                        qty = match.group(4)
+                        price = match.group(5)
+                        all_data.append([vendor, item_no, desc, unit, qty, price])
 
     if all_data:
-        final_df = pd.DataFrame(all_data)
-        st.success("✅ تم استخراج البيانات!")
-        st.dataframe(final_df)
+        df = pd.DataFrame(all_data, columns=["المورد", "رقم الصنف", "البيان", "الوحدة", "الكمية", "السعر"])
+        st.success(f"✅ تم استخراج {len(all_data)} أصناف بنجاح!")
+        st.dataframe(df, use_container_width=True)
         
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            final_df.to_excel(writer, index=False, header=False)
-        st.download_button("📥 تحميل ملف الإكسل", output.getvalue(), "Invoices.xlsx")
+            df.to_excel(writer, index=False)
+        st.download_button("📥 تحميل ملف Excel الموحد", output.getvalue(), "Invoices_Report.xlsx")
     else:
-        st.warning("⚠️ لم يتم العثور على جداول. تأكد أن الملف أصلي وليس صورة.")
+        st.warning("⚠️ لم يتم العثory على بيانات متوافقة. تأكد من جودة ملف الـ PDF.")

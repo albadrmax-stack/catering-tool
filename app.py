@@ -17,22 +17,27 @@ if uploaded_files:
             for p in pdf.pages:
                 text_full += p.extract_text() or ""
             
-            # تحديد اسم المورد
+            # تحديد اسم المورد من الفاتورة
             vendor = "شركة الخامة الأولية" if "الخامة" in text_full else "مورد غير معروف"
 
             for page in pdf.pages:
                 lines = page.extract_text().split('\n')
                 for line in lines:
-                    # البحث عن (رقم الصنف + البيان + الوحدة + الكمية + السعر)
-                    match = re.search(r'(\d{5})\s+(.*?)\s+(كرتون|كيلو|تلك|حبة|باكيت)\s+(\d+)\s+([\d\.,]+)', line)
+                    # البحث عن نمط: (رقم صنف 5 أرقام) ثم (نص) ثم (وحدة) ثم (كمية)
+                    # هذا النمط مرن جداً ليتناسب مع فاتورة "سوسن" و "باذنجان"
+                    match = re.search(r'(\d{5})\s+(.*?)\s+(كرتون|كيلو|تلك|حبة|باكيت|مليح)\s+(\d+)', line)
                     if match:
+                        # محاولة العثور على السعر في نهاية السطر
+                        price_match = re.findall(r'[\d\.,]+', line)
+                        price = price_match[-2] if len(price_match) >= 2 else "0"
+                        
                         all_data.append({
                             "المورد": vendor,
                             "رقم الصنف": match.group(1),
                             "البيان": match.group(2),
                             "الوحدة": match.group(3),
                             "الكمية": match.group(4),
-                            "السعر": match.group(5)
+                            "السعر": price
                         })
 
     if all_data:
@@ -45,4 +50,4 @@ if uploaded_files:
             df.to_excel(writer, index=False)
         st.download_button("📥 تحميل ملف الإكسل الموحد", output.getvalue(), "Invoices.xlsx")
     else:
-        st.error("❌ لم نتمكن من قراءة البيانات. تأكد أن الملف أصلي وليس 'صورة باهتة' جداً.")
+        st.error("❌ لم نتمكن من العثور على بيانات. تأكد أن الملف أصلي وليس 'صورة باهتة'.")

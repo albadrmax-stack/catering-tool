@@ -2,42 +2,47 @@ import streamlit as st
 import pandas as pd
 import pdfplumber
 import io
+import re
 
-st.set_page_config(page_title="نظام جرد الإعاشة الذكي", layout="wide")
+st.set_page_config(page_title="نظام جرد الإعاشة المطور", layout="wide")
 st.title("📂 مستخرج بيانات فواتير الإعاشة المطور")
 
-uploaded_files = st.file_uploader("ارفع فواتيرك (PDF)", type="pdf", accept_multiple_files=True)
+uploaded_files = st.file_uploader("(PDF) ارفع فواتيرك", type="pdf", accept_multiple_files=True)
 
 if uploaded_files:
-    all_rows = []
-    for file in uploaded_files:
-        with pdfplumber.open(file) as pdf:
-            for page in pdf.pages:
-                # هذا المحرك سيحاول استخراج النص حتى من الصور بجودة عالية
-                text = page.extract_text(layout=True)
-                if text:
-                    lines = text.split('\n')
-                    for line in lines:
-                        # البحث عن الأنماط التي ظهرت في فاتورتك (رقم 5 خانات + نص + سعر)
-                        import re
-                        match = re.search(r'(\d{5})\s+(.*?)\s+(كرتون|كيلو|تلك|حبة)\s+(\d+)\s+([\d\.]+)', line)
-                        if match:
-                            all_rows.append({
-                                "رقم الصنف": match.group(1),
-                                "البيان": match.group(2),
-                                "الوحدة": match.group(3),
-                                "الكمية": match.group(4),
-                                "السعر": match.group(5)
-                            })
+    all_data = []
+    for uploaded_file in uploaded_files:
+        with pdfplumber.open(uploaded_file) as pdf:
+            # محاولة استخراج اسم المورد (شركة الخامة الأولية) [cite: 1, 12]
+            text_full = ""
+            for p in pdf.pages:
+                text_full += p.extract_text() or ""
+            
+            vendor = "شركة الخامة الأولية" if "الخامة" in text_full else "مورد غير معروف" [cite: 1]
 
-    if all_rows:
-        df = pd.DataFrame(all_rows)
-        st.success("✅ تم استخراج البيانات بنجاح!")
+            for page in pdf.pages:
+                lines = page.extract_text().split('\n')
+                for line in lines:
+                    # هذا النمط يبحث عن (رقم الصنف 5 أرقام + الوحدة + الكمية + السعر) 
+                    match = re.search(r'(\d{5})\s+(.*?)\s+(كرتون|كيلو|تلك|حبة|باكيت)\s+(\d+)\s+([\d\.,]+)', line)
+                    if match:
+                        all_data.append({
+                            "المورد": vendor,
+                            "رقم الصنف": match.group(1),
+                            "البيان": match.group(2),
+                            "الوحدة": match.group(3),
+                            "الكمية": match.group(4),
+                            "السعر": match.group(5)
+                        })
+
+    if all_data:
+        df = pd.DataFrame(all_data)
+        st.success(f"✅ تم استخراج {len(df)} صنف بنجاح!")
         st.dataframe(df, use_container_width=True)
         
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
             df.to_excel(writer, index=False)
-        st.download_button("📥 تحميل ملف إكسل الموحد", output.getvalue(), "Invoices_Data.xlsx")
+        st.download_button("📥 تحميل ملف الإكسل الموحد", output.getvalue(), "Invoices.xlsx")
     else:
-        st.error("❌ لم نتمكن من قراءة البيانات. تأكد أن الملف ليس 'صورة باهتة' جداً.")
+        st.error("❌ لم نتمكن من قراءة البيانات. تأكد أن الملف أصلي وليس 'صورة باهتة' جداً.")

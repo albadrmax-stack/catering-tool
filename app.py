@@ -3,66 +3,83 @@ import pandas as pd
 import pdfplumber
 import io
 import re
-
-# OCR
 import pytesseract
-from PIL import Image
-import pdf2image
+from pdf2image import convert_from_bytes
 
 st.set_page_config(page_title="نظام جرد الإعاشة المطور", layout="wide")
 st.title("📂 مستخرج بيانات فواتير الإعاشة المطور")
 
 uploaded_files = st.file_uploader("(PDF) ارفع فواتيرك", type="pdf", accept_multiple_files=True)
 
-def extract_text_with_ocr(file):
-    images = pdf2image.convert_from_bytes(file.read())
+def extract_text_normal(uploaded_file):
+    text_full = ""
+    uploaded_file.seek(0)
+    with pdfplumber.open(uploaded_file) as pdf:
+        for p in pdf.pages:
+            text_full += (p.extract_text() or "") + "\n"
+    return text_full
+
+def extract_text_with_ocr(uploaded_file):
+    uploaded_file.seek(0)
+    images = convert_from_bytes(uploaded_file.read())
     text = ""
     for img in images:
-        text += pytesseract.image_to_string(img, lang='ara')
+        text += pytesseract.image_to_string(img, lang="eng") + "\n"
     return text
+
+def detect_vendor(text):
+    if "الخامة" in text or "Raw Material" in text:
+        return "شركة الخامة الأولية"
+    return "مورد غير معروف"
+
+def normalize_digits(text):
+    arabic_to_english = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
+    return text.translate(arabic_to_english)
 
 if uploaded_files:
     all_data = []
 
     for uploaded_file in uploaded_files:
+        text_full = extract_text_normal(uploaded_file)
 
-        # أولاً نحاول قراءة النص العادي
-        with pdfplumber.open(uploaded_file) as pdf:
-            text_full = ""
-            for p in pdf.pages:
-                page_text = p.extract_text() or ""
-                text_full += page_text + "\n"
+        if len(text_full.strip()) < 30:
+            try:
+                text_full = extract_text_with_ocr(uploaded_file)
+            except Exception as e:
+                st.error(f"تعذر تشغيل OCR على الملف {uploaded_file.name}: {e}")
+                continue
 
-        # إذا النص فاضي → نستخدم OCR
-        if len(text_full.strip()) < 50:
-            uploaded_file.seek(0)
-            text_full = extract_text_with_ocr(uploaded_file)
-
-        vendor = "شركة الخامة الأولية" if "الخامة" in text_full else "مورد غير معروف"
-
-        lines = text_full.split("\n")
+        text_full = normalize_digits(text_full)
+        vendor = detect_vendor(text_full)
+        lines = text_full.splitlines()
 
         for line in lines:
+            line = normalize_digits(line.strip())
             parts = line.split()
 
-            if len(parts) >= 3 and parts[0].isdigit():
+            if len(parts) < 4:
+                continue
 
-                numbers = [x for x in parts if x.replace('.', '', 1).isdigit()]
+            if not parts[0].isdigit():
+                continue
 
-                if len(numbers) >= 2:
-                    item_no = parts[0]
-                    qty = numbers[-2]
-                    price = numbers[-1]
+            nums = [p for p in parts if re.fullmatch(r"\d+(?:\.\d+)?", p)]
 
-                    desc = " ".join(parts[1:-2]) if len(parts) > 3 else "صنف غير معروف"
+            if len(nums) < 3:
+                continue
 
-                    all_data.append({
-                        "المورد": vendor,
-                        "رقم الصنف": item_no,
-                        "البيان": desc,
-                        "الكمية": qty,
-                        "السعر": price
-                    })
+            item_no = parts[0]
+            qty = nums[-2]
+            price = nums[-1]
+            desc = " ".join(parts[1:-2]).strip()
+
+            all_data.append({
+                "المورد": vendor,
+                "رقم الصنف": item_no,
+                "البيان": desc if desc else "صنف غير معروف",
+                "الكمية": qty,
+                "السعر": price
+            })
 
     if all_data:
         df = pd.DataFrame(all_data)
@@ -70,13 +87,14 @@ if uploaded_files:
         st.dataframe(df, use_container_width=True)
 
         output = io.BytesIO()
-        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
             df.to_excel(writer, index=False)
 
         st.download_button(
             "📥 تحميل ملف الإكسل الموحد",
-            output.getvalue(),
-            "Invoices.xlsx"
+            data=output.getvalue(),
+            file_name="Invoices.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
     else:
-        st.error("❌ لم نتمكن من قراءة الفاتورة — غالباً تحتاج OCR أو تنسيق مختلف.")
+        st.error("❌ لم نتمكن من العثور على بيانات. الملف غالبًا صورة ممسوحة ويحتاج OCR مضبوط.")

@@ -17,26 +17,30 @@ if uploaded_files:
             for p in pdf.pages:
                 text_full += p.extract_text() or ""
             
-            # تحديد اسم المورد من الفاتورة
+            # تحديد اسم المورد [cite: 1]
             vendor = "شركة الخامة الأولية" if "الخامة" in text_full else "مورد غير معروف"
 
             for page in pdf.pages:
                 lines = page.extract_text().split('\n')
                 for line in lines:
-                    # البحث عن نمط: (رقم صنف 5 أرقام) ثم (نص) ثم (وحدة) ثم (كمية)
-                    # هذا النمط مرن جداً ليتناسب مع فاتورة "سوسن" و "باذنجان"
-                    match = re.search(r'(\d{5})\s+(.*?)\s+(كرتون|كيلو|تلك|حبة|باكيت|مليح)\s+(\d+)', line)
-                    if match:
-                        # محاولة العثور على السعر في نهاية السطر
-                        price_match = re.findall(r'[\d\.,]+', line)
-                        price = price_match[-2] if len(price_match) >= 2 else "0"
+                    # البحث عن أي سطر يبدأ برقم صنف (مثل 00098) 
+                    parts = line.split()
+                    if len(parts) >= 4 and parts[0].isdigit() and len(parts[0]) >= 3:
+                        # استخراج البيانات بناءً على موقعها في السطر
+                        item_no = parts[0] # رقم الصنف 
+                        qty = parts[-2] if parts[-2].replace('.', '').isdigit() else "0" # الكمية 
+                        price = parts[-1] if parts[-1].replace('.', '').isdigit() else "0" # السعر 
+                        
+                        # تجميع اسم الصنف من الكلمات الموجودة في الوسط
+                        desc = " ".join(parts[1:-3]) if len(parts) > 4 else "صنف غير معروف"
+                        unit = parts[-3] if len(parts) > 3 else "وحدة" # الوحدة 
                         
                         all_data.append({
                             "المورد": vendor,
-                            "رقم الصنف": match.group(1),
-                            "البيان": match.group(2),
-                            "الوحدة": match.group(3),
-                            "الكمية": match.group(4),
+                            "رقم الصنف": item_no,
+                            "البيان": desc,
+                            "الوحدة": unit,
+                            "الكمية": qty,
                             "السعر": price
                         })
 

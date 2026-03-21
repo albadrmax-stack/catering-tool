@@ -11,11 +11,12 @@ import re
 # إعداد الصفحة
 st.set_page_config(page_title="أداة شركة أزواد الذكية", layout="wide")
 
-# تهيئة مخزن الترتيب في ذاكرة المتصفح
+# تهيئة مخزن الترتيب مع الأعمدة الجديدة
 if 'cols_order' not in st.session_state:
     st.session_state.cols_order = [
-        'اسم المورد', 'رقم الصنف', 'المادة/اسم المنتج', 'الوحدة الصغيرة', 
-        'الكمية', 'الوحدة الكبيرة', 'معامل التحويل', 'الكمية بالوحدة الكبيرة', 'السعر الافرادي'
+        'اسم المورد', 'رقم الفاتورة / عرض السعر', 'الرقم الضريبي للمورد', 'رقم السجل التجاري',
+        'رقم الصنف', 'المادة/اسم المنتج', 'الوحدة الصغيرة', 'الكمية', 
+        'الوحدة الكبيرة', 'معامل التحويل', 'الكمية بالوحدة الكبيرة', 'السعر الافرادي'
     ]
 
 st.markdown("""
@@ -31,14 +32,13 @@ st.markdown("""
         border-radius: 10px !important; width: 100% !important;
     }
     .stCheckbox { text-align: right; direction: rtl; font-weight: bold; }
-    .order-box { background-color: #f0f2f6; padding: 10px; border-radius: 10px; margin-bottom: 20px; border: 1px dashed #ff4b4b; }
+    div[data-baseweb="select"] { direction: rtl; }
     </style>
     
     <div class="title-red">أداة شركة أزواد الذكية</div>
-    <div class="subtitle-gray">رتب أعمدتك كما تحب: العمود الذي تختاره أولاً يظهر أولاً في الإكسل</div>
+    <div class="subtitle-gray">استخراج شامل لبيانات المورد، السجل التجاري، والارقام الضريبية بدقة</div>
 """, unsafe_allow_html=True)
 
-# دالات المساعدة
 def compress_image(image_bytes):
     img = Image.open(io.BytesIO(image_bytes))
     if img.mode != 'RGB': img = img.convert('RGB')
@@ -50,7 +50,7 @@ def get_drive_id(url):
     return m.group(1) if m else None
 
 # --- واجهة الإدخال ---
-with st.form("dynamic_form"):
+with st.form("azwad_master_form"):
     selection = st.radio("طريقة الإدخال", ["ارفع ملف / ملفات", "التقاط صورة / صور", "رابط قوقل درايف"], horizontal=True)
     
     files_input = None
@@ -64,15 +64,16 @@ with st.form("dynamic_form"):
 
     st.markdown("### ⚙️ اختر الأعمدة (بالترتيب الذي تفضله):")
     
+    # قائمة الخيارات الموسعة
     all_options = [
-        'اسم المورد', 'رقم الصنف', 'المادة/اسم المنتج', 'الوحدة الصغيرة', 
-        'الكمية', 'الوحدة الكبيرة', 'معامل التحويل', 'الكمية بالوحدة الكبيرة', 
-        'السعر الافرادي', 'البيان الأصلي', 'التصنيف الذكي', 'الضريبة', 'الإجمالي الصافي'
+        'اسم المورد', 'رقم الفاتورة / عرض السعر', 'الرقم الضريبي للمورد', 'رقم السجل التجاري',
+        'رقم الصنف', 'المادة/اسم المنتج', 'الوحدة الصغيرة', 'الكمية', 
+        'الوحدة الكبيرة', 'معامل التحويل', 'الكمية بالوحدة الكبيرة', 'السعر الافرادي',
+        'البيان الأصلي', 'التصنيف الذكي', 'الضريبة', 'الإجمالي الصافي'
     ]
     
-    # ميزة الترتيب الذكي: نستخدم multiselect ليسمح للمستخدم بالترتيب اليدوي
     chosen_cols = st.multiselect(
-        "اسحب الأسماء أو اخترها بالترتيب المطلوب (من اليمين لليسار):",
+        "رتب الأعمدة المختارة بسحبها أو اختيارها بالترتيب:",
         options=all_options,
         default=st.session_state.cols_order
     )
@@ -82,48 +83,58 @@ with st.form("dynamic_form"):
 # --- التنفيذ ---
 if submit and (files_input or (selection == "رابط قوقل درايف" and d_url)):
     final_files = []
-    # منطق جلب الملفات
     if selection == "رابط قوقل درايف":
         fid = get_drive_id(d_url)
         if fid:
-            r = requests.get(f"https://docs.google.com/uc?export=download&id={fid}")
-            if r.status_code == 200: final_files.append({"name": "drive.jpg", "content": r.content, "type": "image/jpeg"})
+            try:
+                r = requests.get(f"https://docs.google.com/uc?export=download&id={fid}")
+                if r.status_code == 200: final_files.append({"name": "drive.jpg", "content": r.content, "type": "image/jpeg"})
+            except: st.error("فشل جلب الملف من درايف")
     else:
         for f in files_input: final_files.append({"name": f.name, "content": f.read(), "type": f.type})
 
     if final_files:
-        with st.spinner("جاري التحليل وفق ترتيبك الخاص..."):
+        with st.spinner("جاري استخراج البيانات والارقام الضريبية..."):
             try:
-                # صيد الموديل
                 gen_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-                model = genai.GenerativeModel(next((m for m in gen_models if "1.5" in m), gen_models[0]))
+                target_m = next((m for m in gen_models if "1.5" in m or "flash" in m), gen_models[0])
+                model = genai.GenerativeModel(target_m)
                 
                 results = []
                 for f_item in final_files:
                     if "pdf" in f_item["type"]:
                         p = pdf2image.convert_from_bytes(f_item["content"])
                         b = io.BytesIO(); p[0].save(b, format='PNG'); payload = b.getvalue()
-                    else: payload = compress_image(f_data := f_item["content"])
+                    else: payload = compress_image(f_item["content"])
 
-                    prompt = f"استخرج البيانات التالية فقط في JSON بأسماء الحقول المذكورة: {', '.join(chosen_cols)}"
+                    # التعليمات البرمجية المحدثة للذكاء الاصطناعي
+                    prompt = f"""
+                    استخرج البيانات التالية بدقة من الفاتورة في قالب JSON بأسماء الحقول المذكورة تماماً:
+                    - 'رقم الفاتورة / عرض السعر': ابحث عنه في ترويسة الفاتورة.
+                    - 'الرقم الضريبي للمورد': الرقم المكون من 15 خانة غالباً.
+                    - 'رقم السجل التجاري': رقم السجل التجاري للشركة الموردة.
+                    - باقي الحقول المطلوبة: {', '.join(chosen_cols)}
+                    يجب أن تكون النتيجة قائمة JSON تحت مفتاح 'الأصناف'.
+                    """
+                    
                     response = model.generate_content([prompt, {"mime_type": "image/jpeg", "data": payload}])
-                    data = json.loads(response.text.strip().replace('```json', '').replace('```', ''))
+                    data_txt = response.text.strip().replace('```json', '').replace('```', '')
+                    data = json.loads(data_txt)
                     items = data if isinstance(data, list) else data.get('الأصناف', [])
                     results.extend(items)
 
                 if results:
                     df = pd.DataFrame(results)
-                    # السحر هنا: إعادة ترتيب الأعمدة تماماً كما اختار المستخدم في الـ multiselect
+                    # ضمان الترتيب الذي اختاره المستخدم
                     df = df[[c for c in chosen_cols if c in df.columns]]
                     
-                    st.success("✅ اكتمل التحليل بالترتيب المطلوب!")
+                    st.success("✅ تم الاستخراج والتدقيق بنجاح!")
                     st.dataframe(df, use_container_width=True)
                     
-                    # إكسل
                     out = io.BytesIO()
                     with pd.ExcelWriter(out, engine='xlsxwriter') as wr:
                         df.to_excel(wr, index=False, sheet_name='أزواد')
                         wr.sheets['أزواد'].right_to_left()
-                    st.download_button("⬇️ تحميل الإكسل المُرتب", out.getvalue(), "Azwad_Custom_Order.xlsx")
+                    st.download_button("⬇️ تحميل التقرير الشامل", out.getvalue(), "Azwad_Master_Report.xlsx")
             except Exception as e:
-                st.error(f"خطأ: {e}")
+                st.error(f"حدث خطأ: {e}")

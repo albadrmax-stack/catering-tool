@@ -18,7 +18,7 @@ st.markdown("""
     .stButton > button { background-color: #ff4b4b !important; color: white !important; width: 100% !important; }
     </style>
     <div class="title-red">أداة شركة أزواد الذكية</div>
-    <div style="text-align: center; color: gray;">نظام التحليل المطور - نسخة تتبع الأعطال</div>
+    <div style="text-align: center; color: gray;">لمساعدة فريق أزواد في عمليات الجرد والتصنيع</div>
 """, unsafe_allow_html=True)
 
 # دالة ضغط الصور

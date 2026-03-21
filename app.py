@@ -19,28 +19,33 @@ except Exception as e:
 uploaded_files = st.file_uploader("ارفع فواتيرك (PDF أو صور)", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True)
 
 if uploaded_files:
-    # تم تغيير اسم الموديل هنا إلى النسخة الأحدث المتوفرة
-    model = genai.GenerativeModel('models/gemini-1.5-flash-latest')
+    # تم استخدام المسمى الأكثر استقراراً هنا
+    model = genai.GenerativeModel('gemini-1.5-flash')
     
     for uploaded_file in uploaded_files:
-        with st.spinner(f'جاري تحليل {uploaded_file.name} باستخدام الذكاء الاصطناعي...'):
-            if uploaded_file.type == "application/pdf":
-                images = pdf2image.convert_from_bytes(uploaded_file.read())
-                img = images[0]
-            else:
-                img = Image.open(uploaded_file)
-
-            prompt = """
-            حلل صورة الفاتورة هذه واستخرج الأصناف في جدول يحتوي على الأعمدة التالية:
-            (رقم الصنف، البيان، الوحدة، الكمية، السعر).
-            أريد النتيجة كجدول Markdown فقط، وتأكد من كتابة الأرقام بشكل صحيح.
-            """
-            
+        with st.spinner(f'جاري تحليل {uploaded_file.name} بدقة عالية...'):
             try:
+                if uploaded_file.type == "application/pdf":
+                    images = pdf2image.convert_from_bytes(uploaded_file.read())
+                    img = images[0]
+                else:
+                    img = Image.open(uploaded_file)
+
+                # تعليمات دقيقة جداً للذكاء الاصطناعي
+                prompt = """
+                أنت خبير في قراءة فواتير الإعاشة السعودية. 
+                استخرج جدولاً دقيقاً يحتوي على:
+                (رقم الصنف، البيان، الوحدة، الكمية، السعر).
+                اجعل النتيجة كجدول Markdown فقط، بدون كلام جانبي.
+                """
+                
                 response = model.generate_content([prompt, img])
+                
                 st.markdown(f"### بيانات الفاتورة: {uploaded_file.name}")
                 st.markdown(response.text)
+                
             except Exception as e:
-                st.error(f"حدث خطأ أثناء الاتصال بجوجل: {e}")
+                st.error(f"⚠️ حدث تنبيه أثناء المعالجة: {str(e)}")
+                st.info("تأكد من أن المفتاح السري (API Key) مفعل وصحيح في إعدادات Secrets.")
 
-    st.success("✅ تمت العملية بنجاح!")
+    st.success("✅ اكتملت العملية!")

@@ -149,12 +149,13 @@ if files_to_process:
                 check_cols_container = st.columns(3)
                 
                 for i, col in enumerate(all_cols):
+                    # وضع "صح" تلقائي على الأعمدة التي طلبتها في صورتك
                     is_checked = col in default_cols
                     if check_cols_container[i % 3].checkbox(col, value=is_checked, key=f"chk_{col}"):
                         cols_to_show.append(col)
 
                 if cols_to_show:
-                    # ترتيب الأعمدة المختارة ليكون الترتيب الأساسي كما في الصورة
+                    # ترتيب الأعمدة المختارة ليكون الترتيب الأساسي كما في الصورة أولاً
                     final_order = [c for c in default_cols if c in cols_to_show] + [c for c in cols_to_show if c not in default_cols]
                     df_final = df_full[final_order]
                     

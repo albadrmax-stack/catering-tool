@@ -204,6 +204,6 @@ if submit and (files_input or (selection == "رابط درايف المباشر"
                     with pd.ExcelWriter(out, engine='xlsxwriter') as wr:
                         df.to_excel(wr, index=False, sheet_name='أزواد Master')
                         wr.sheets['أزواد Master'].right_to_left()
-                    st.download_button("⬇️ تحميل تقرير أزواد الشامل والمنظف", out.getvalue(), "Azwad_Master_Report.xlsx")
+                    st.download_button("⬇️ تحميل ملف الاكسل", out.getvalue(), "Azwad_Master_Report.xlsx")
             except Exception as e:
                 st.error(f"حدث خطأ: {e}")

@@ -5,11 +5,10 @@ import io
 from PIL import Image
 import pdf2image
 
-# إعداد واجهة البرنامج
 st.set_page_config(page_title="مستخرج فواتير الإعاشة الذكي", layout="wide")
 st.title("🤖 مستخرج الفواتير المطور (بذكاء Gemini)")
 
-# جلب المفتاح السري من الخزنة
+# جلب المفتاح السري
 try:
     api_key = st.secrets["GEMINI_API_KEY"]
     genai.configure(api_key=api_key)
@@ -20,29 +19,28 @@ except Exception as e:
 uploaded_files = st.file_uploader("ارفع فواتيرك (PDF أو صور)", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True)
 
 if uploaded_files:
-    model = genai.GenerativeModel('gemini-1.5-flash')
+    # تم تغيير اسم الموديل هنا إلى النسخة الأحدث المتوفرة
+    model = genai.GenerativeModel('models/gemini-1.5-flash-latest')
     
     for uploaded_file in uploaded_files:
         with st.spinner(f'جاري تحليل {uploaded_file.name} باستخدام الذكاء الاصطناعي...'):
-            # تحويل الملف إلى صورة ليفهمها Gemini
             if uploaded_file.type == "application/pdf":
                 images = pdf2image.convert_from_bytes(uploaded_file.read())
-                img = images[0] # نأخذ الصفحة الأولى
+                img = images[0]
             else:
                 img = Image.open(uploaded_file)
 
-            # الطلب من الذكاء الاصطناعي
             prompt = """
-            حلل صورة الفاتورة هذه واستخرج الأصناف في جدول يحتوي على الأعمدة التالية بالترتيب:
+            حلل صورة الفاتورة هذه واستخرج الأصناف في جدول يحتوي على الأعمدة التالية:
             (رقم الصنف، البيان، الوحدة، الكمية، السعر).
-            أريد النتيجة كجدول نصي فقط (Markdown Table).
+            أريد النتيجة كجدول Markdown فقط، وتأكد من كتابة الأرقام بشكل صحيح.
             """
             
-            response = model.generate_content([prompt, img])
-            
-            # عرض النتيجة
-            st.markdown(f"### بيانات الفاتورة: {uploaded_file.name}")
-            st.markdown(response.text)
+            try:
+                response = model.generate_content([prompt, img])
+                st.markdown(f"### بيانات الفاتورة: {uploaded_file.name}")
+                st.markdown(response.text)
+            except Exception as e:
+                st.error(f"حدث خطأ أثناء الاتصال بجوجل: {e}")
 
     st.success("✅ تمت العملية بنجاح!")
-    st.info("💡 يمكنك الآن نسخ الجدول مباشرة إلى ملف الإكسل الخاص بك.")

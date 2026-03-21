@@ -47,7 +47,6 @@ if uploaded_files:
                     else:
                         img = Image.open(uploaded_file)
 
-                    # تم تعديل الطلب لفصل (الوحدة) عن (الرقم) بذكاء
                     prompt = """
                     أنت خبير في قراءة وتحليل فواتير الإعاشة العربية.
                     حلل صورة الفاتورة بدقة، واستخرج 'اسم المورد' (اسم الشركة البائعة من أعلى الفاتورة).
@@ -88,7 +87,6 @@ if uploaded_files:
             st.markdown("### 📊 الجدول النهائي المجمع لجميع الفواتير:")
             df = pd.DataFrame(all_invoices_data)
             
-            # تحديث قاموس الأسماء ليحتوي على الأعمدة الجديدة
             excel_columns_map = {
                 'اسم_المورد': 'اسم المورد',
                 'رقم_الصنف': 'رقم الصنف',
@@ -102,16 +100,21 @@ if uploaded_files:
             }
             df.rename(columns=excel_columns_map, inplace=True)
             
-            # الترتيب الجديد للأعمدة كما طلبت في الصورة (المادة -> الوحدة -> وزن الحبة)
             cols_order = ['اسم المورد', 'رقم الصنف', 'المادة/اسم المنتج', 'الوحدة', 'وزن الحبة', 'معامل التحويل (حبة/كرتون)', 'الوحدة الكبيرة', 'الكمية (بالكرتون)', 'السعر الإجمالي']
             existing_cols = [c for c in cols_order if c in df.columns]
             df = df[existing_cols]
             
             st.dataframe(df, use_container_width=True)
 
+            # --- هنا السحر الجديد لقلب الإكسل من اليمين لليسار ---
             excel_io = io.BytesIO()
             with pd.ExcelWriter(excel_io, engine='xlsxwriter') as writer:
                 df.to_excel(writer, index=False, sheet_name='فواتير_أزواد')
+                
+                # الوصول لخصائص الشيت وقلب الاتجاه
+                worksheet = writer.sheets['فواتير_أزواد']
+                worksheet.right_to_left()
+            # ----------------------------------------------------
             
             st.download_button(
                 label="تحميل اكسل",

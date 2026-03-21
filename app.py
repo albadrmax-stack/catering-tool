@@ -5,9 +5,11 @@ import io
 from PIL import Image
 import pdf2image
 import json
+import requests
+import re
 
-# دالة لتصغير حجم الصورة مع الحفاظ على الجودة
-def compress_image(image_bytes, quality=70):
+# دالة لتصغير حجم الصورة للحفاظ على السرعة والجودة
+def compress_image(image_bytes, quality=75):
     img = Image.open(io.BytesIO(image_bytes))
     if img.mode != 'RGB':
         img = img.convert('RGB')
@@ -15,133 +17,145 @@ def compress_image(image_bytes, quality=70):
     img.save(output, format='JPEG', quality=quality)
     return output.getvalue()
 
-st.set_page_config(page_title="أداة أزواد الذكية لمسح المستندات والصور وتحويلها اكسل", layout="wide")
-st.title("أداة أزواد الذكية لمسح المستندات والصور وتحويلها اكسل")
+# دالة لاستخراج معرف الملف من رابط قوقل درايف
+def get_drive_file_id(url):
+    pattern = r"(?:id=|\/d\/|folders\/)([a-zA-Z0-9-_]+)"
+    match = re.search(pattern, url)
+    return match.group(1) if match else None
+
+# --- إعدادات الصفحة والعناوين المطلوبة ---
+st.set_page_config(page_title="أداة شركة أزواد الذكية", layout="wide")
+
+# تصميم العنوان (الأحمر العريض) والوصف (الرمادي الصغير)
+st.markdown("""
+    <div style="text-align: right;">
+        <h1 style="color: #ff4b4b; font-size: 3rem; margin-bottom: 5px;">أداة شركة أزواد الذكية</h1>
+        <p style="color: #6b7280; font-size: 1.2rem;">مسح الفواتير وعروض الاسعار وتحويلها اكسل</p>
+    </div>
+    <hr>
+""", unsafe_allow_html=True)
 
 try:
     api_key = st.secrets["GEMINI_API_KEY"]
     genai.configure(api_key=api_key)
-except Exception as e:
-    st.error("❌ لم يتم العثور على المفتاح السري.")
+except Exception:
+    st.error("❌ خطأ: لم يتم العثور على المفتاح السري (API Key).")
     st.stop()
 
-# --- تنسيق الأزرار العربية الملونة عبر CSS ---
+# --- تنسيق الأزرار الثلاثة الملونة بالعربية ---
 st.markdown("""
 <style>
-    div[data-testid="stRadio"] > label {
-        font-size: 1.5rem !important;
-        font-weight: bold !important;
-        margin-bottom: 15px !important;
-    }
-    /* تنسيق الخيارات لتشبه الأزرار الكبيرة */
     div[data-testid="stRadio"] div[role="radiogroup"] {
         flex-direction: row !important;
         gap: 20px !important;
+        justify-content: flex-start !important;
     }
     div[data-testid="stRadio"] div[role="radiogroup"] label {
-        background-color: #f0f2f6;
-        padding: 20px 40px !important;
-        border-radius: 15px !important;
-        border: 2px solid #d1d5db !important;
+        background-color: #f9fafb;
+        padding: 15px 30px !important;
+        border-radius: 12px !important;
+        border: 2px solid #e5e7eb !important;
+        font-weight: bold !important;
         cursor: pointer !important;
-        transition: 0.3s !important;
     }
-    /* اللون الأحمر لخيار الرفع */
-    div[data-testid="stRadio"] div[role="radiogroup"] label:nth-of-type(1) {
-        border-color: #ff4b4b !important;
-        color: #ff4b4b !important;
-    }
-    /* اللون الكحلي لخيار الالتقاط */
-    div[data-testid="stRadio"] div[role="radiogroup"] label:nth-of-type(2) {
-        border-color: #1a2a40 !important;
-        color: #1a2a40 !important;
-    }
+    /* الخيار 1: الرفع (أحمر) */
+    div[data-testid="stRadio"] div[role="radiogroup"] label:nth-of-type(1) { border-color: #ff4b4b !important; color: #ff4b4b !important; }
+    /* الخيار 2: التقاط (كحلي) */
+    div[data-testid="stRadio"] div[role="radiogroup"] label:nth-of-type(2) { border-color: #1a2a40 !important; color: #1a2a40 !important; }
+    /* الخيار 3: درايف (أخضر) */
+    div[data-testid="stRadio"] div[role="radiogroup"] label:nth-of-type(3) { border-color: #34a853 !important; color: #34a853 !important; }
 </style>
 """, unsafe_allow_html=True)
 
-st.markdown("### ✨ خيارات الرفع (اختر واحداً للبدء):")
-
-# استخدام الراديو بدلاً من pills لضمان التوافق
 selection = st.radio(
-    "اختر طريقة الرفع:",
-    ["ارفع الملف / الملفات", "التقاط صورة / صور"],
+    "اختر طريقة الإدخال:",
+    ["ارفع ملف / ملفات", "التقاط صورة / صور", "رابط قوقل درايف"],
     horizontal=True,
     label_visibility="collapsed"
 )
 
-uploaded_files = []
+# قائمة لتجميع كل المحتويات المراد تحليلها
+files_to_process = []
 
-if selection == "ارفع الملف / الملفات":
-    file_uploads = st.file_uploader("قم بسحب الملفات هنا", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True)
-    if file_uploads:
-        uploaded_files.extend(file_uploads)
+if selection == "ارفع ملف / ملفات":
+    uploads = st.file_uploader("قم بسحب الصور أو ملفات PDF هنا", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True)
+    if uploads:
+        for f in uploads:
+            files_to_process.append({"name": f.name, "content": f.read(), "type": f.type})
 
 elif selection == "التقاط صورة / صور":
-    # الكاميرا لا تعمل تلقائياً، تظهر فقط عند اختيار هذا الخيار
-    camera_captures = st.camera_input("وجه الكاميرا نحو الفاتورة والتقط الصورة")
-    if camera_captures:
-        uploaded_files.append(camera_captures)
+    camera_files = st.camera_input("التقط صور الفواتير مباشرة")
+    if camera_files:
+        # ملاحظة: في النسخ الحالية st.camera_input تلتقط صورة واحدة، أضفتها للقائمة للتوافق
+        files_to_process.append({"name": "صورة_كاميرا.jpg", "content": camera_files.read(), "type": "image/jpeg"})
 
-if uploaded_files:
-    with st.spinner("جاري الاتصال بجوجل وفحص المحركات... 🔍"):
+elif selection == "رابط قوقل درايف":
+    drive_url = st.text_input("الصق رابط الملف من قوقل درايف (تأكد أن الوصول عام):")
+    if drive_url:
+        fid = get_drive_file_id(drive_url)
+        if fid:
+            d_url = f"https://docs.google.com/uc?export=download&id={fid}"
+            with st.spinner("جاري سحب الملف من درايف..."):
+                try:
+                    res = requests.get(d_url)
+                    if res.status_code == 200:
+                        files_to_process.append({"name": "ملف_درايف.jpg", "content": res.content, "type": "image/jpeg"})
+                        st.success("✅ تم جلب الملف بنجاح!")
+                except Exception as e:
+                    st.error(f"❌ تعذر الوصول للرابط: {e}")
+
+# --- بدء المعالجة الذكية ---
+if files_to_process:
+    with st.spinner("جاري الاتصال بمحرك شركة أزواد الذكي... 🔍"):
         try:
             available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
             target_model = next((m for m in available_models if "1.5" in m or "vision" in m), available_models[0])
             model = genai.GenerativeModel(target_model)
         except Exception as e:
-            st.error(f"حدث خطأ أثناء الاتصال بجوجل: {e}")
+            st.error(f"خطأ في الاتصال: {e}")
             st.stop()
 
-        all_invoices_data = []
-        for uploaded_file in uploaded_files:
-            file_name = uploaded_file.name if hasattr(uploaded_file, 'name') else "صورة_ملتقطة.jpg"
-            with st.spinner(f'جاري معالجة وتحليل فاتورة: {file_name}...'):
-                try:
-                    file_content = uploaded_file.read()
-                    if uploaded_file.type == "application/pdf":
-                        images = pdf2image.convert_from_bytes(file_content)
-                        img_bytes = io.BytesIO()
-                        images[0].save(img_bytes, format='PNG')
-                        img_to_send = img_bytes.getvalue()
-                    else:
-                        st.info(f"تنبيه: حجم الملف: {len(file_content)/1024/1024:.2f} ميجا. جاري التصغير...")
-                        img_to_send = compress_image(file_content)
+    all_rows = []
+    for f_data in files_to_process:
+        with st.spinner(f"جاري تحليل: {f_data['name']}..."):
+            try:
+                # معالجة الملفات (PDF أو صور مضغوطة)
+                if "pdf" in f_data["type"]:
+                    imgs = pdf2image.convert_from_bytes(f_data["content"])
+                    buf = io.BytesIO()
+                    imgs[0].save(buf, format='PNG')
+                    img_payload = buf.getvalue()
+                else:
+                    img_payload = compress_image(f_data["content"])
 
-                    prompt = """
-                    أنت خبير في قراءة وتحليل فواتير الإعاشة العربية.
-                    حلل صورة الفاتورة بدقة، واستخرج 'اسم المورد'.
-                    استخرج الأصناف في تنسيق JSON يحتوي على قائمة 'الأصناف'، وكل صنف يحتوي على الحقول:
-                    'اسم_المورد'، 'رقم_الصنف'، 'المادة'، 'الوحدة_الصغيرة' (مثلاً كيلو)، 'وزن_الحبة' (رقم فقط)، 
-                    'معامل_التحويل_في_الكرتون'، 'الوحدة_الرئيسية'، 'الكمية_بالفاتورة'، 'السعر'.
-                    أريد JSON خام فقط بدون مقدمات.
-                    """
-                    
-                    response = model.generate_content([prompt, {"mime_type": "image/jpeg", "data": img_to_send}])
-                    cleaned_json_text = response.text.strip().replace('```json', '').replace('```', '').strip()
-                    data_json = json.loads(cleaned_json_text)
-                    
-                    if 'الأصناف' in data_json:
-                        all_invoices_data.extend(data_json['الأصناف'])
-                    
-                except Exception as e:
-                    st.error(f"⚠️ خطأ في معالجة {file_name}: {str(e)}")
+                prompt = """
+                تحليل دقيق للفاتورة: استخرج (اسم المورد، رقم الصنف، المادة، الوحدة، وزن الحبة، معامل التحويل، الوحدة الكبيرة، الكمية، السعر).
+                أريد النتيجة JSON فقط في قائمة تحت مفتاح 'الأصناف'.
+                """
+                
+                response = model.generate_content([prompt, {"mime_type": "image/jpeg", "data": img_payload}])
+                clean_json = response.text.strip().replace('```json', '').replace('```', '').strip()
+                data = json.loads(clean_json)
+                if 'الأصناف' in data:
+                    all_rows.extend(data['الأصناف'])
+            except Exception as e:
+                st.warning(f"⚠️ خطأ في {f_data['name']}: {e}")
 
-        if all_invoices_data:
-            df = pd.DataFrame(all_invoices_data)
-            excel_columns_map = {
-                'اسم_المورد': 'اسم المورد', 'رقم_الصنف': 'رقم الصنف', 'المادة': 'المادة/اسم المنتج',
-                'الوحدة_الصغيرة': 'الوحدة', 'وزن_الحبة': 'وزن الحبة', 'معامل_التحويل_في_الكرتون': 'معامل التحويل (حبة/كرتون)',
-                'الوحدة_الرئيسية': 'الوحدة الكبيرة', 'الكمية_بالفاتورة': 'الكمية (بالكرتون)', 'السعر': 'السعر الإجمالي'
-            }
-            df.rename(columns=excel_columns_map, inplace=True)
-            cols_order = ['اسم المورد', 'رقم الصنف', 'المادة/اسم المنتج', 'الوحدة', 'وزن الحبة', 'معامل التحويل (حبة/كرتون)', 'الوحدة الكبيرة', 'الكمية (بالكرتون)', 'السعر الإجمالي']
-            df = df[[c for c in cols_order if c in df.columns]]
-            
-            st.dataframe(df, use_container_width=True)
-            
-            excel_io = io.BytesIO()
-            with pd.ExcelWriter(excel_io, engine='xlsxwriter') as writer:
-                df.to_excel(writer, index=False, sheet_name='فواتير_أزواد')
-                writer.sheets['فواتير_أزواد'].right_to_left()
-            
-            st.download_button(label="تحميل اكسل", data=excel_io.getvalue(), file_name="فواتير_أزواد_المجمعة.xlsx", mime="application/vnd.ms-excel")
+    if all_rows:
+        df = pd.DataFrame(all_rows)
+        # تنسيق الأعمدة
+        col_map = {
+            'اسم_المورد': 'اسم المورد', 'رقم_الصنف': 'رقم الصنف', 'المادة': 'المادة/اسم المنتج',
+            'الوحدة': 'الوحدة', 'وزن_الحبة': 'وزن الحبة', 'معامل_التحويل': 'معامل التحويل',
+            'الوحدة_الكبيرة': 'الوحدة الكبيرة', 'الكمية': 'الكمية', 'السعر': 'السعر الإجمالي'
+        }
+        df.rename(columns=col_map, inplace=True)
+        st.dataframe(df, use_container_width=True)
+
+        # تصدير الإكسل من اليمين لليسار
+        excel_io = io.BytesIO()
+        with pd.ExcelWriter(excel_io, engine='xlsxwriter') as writer:
+            df.to_excel(writer, index=False, sheet_name='أزواد')
+            writer.sheets['أزواد'].right_to_left()
+        
+        st.download_button("تحميل اكسل", data=excel_io.getvalue(), file_name="AZWAD_REPORT.xlsx", mime="application/vnd.ms-excel")

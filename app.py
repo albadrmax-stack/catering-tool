@@ -8,7 +8,7 @@ import json
 import requests
 import re
 
-# 1. إعداد الصفحة
+# إعداد الصفحة
 st.set_page_config(page_title="أداة شركة أزواد الذكية", layout="wide")
 
 st.markdown("""
@@ -32,7 +32,7 @@ st.markdown("""
     </style>
     
     <div class="title-red">أداة شركة أزواد الذكية</div>
-    <div class="subtitle-gray">تم تثبيت الترتيب والمنطق الحسابي بنجاح 100%</div>
+    <div class="subtitle-gray">تم تثبيت الترتيب وإصلاح الضريبة والتصنيف والمعامل 100%</div>
 """, unsafe_allow_html=True)
 
 try:
@@ -102,7 +102,7 @@ if submit and (files_input or (selection == "رابط درايف المباشر"
         for f in input_list: final_files.append({"name": f.name, "content": f.read(), "type": f.type})
 
     if final_files:
-        with st.spinner("جاري استخراج البيانات وضبط المورد والعمليات الحسابية..."):
+        with st.spinner("جاري استخراج البيانات بذكاء وإصلاح الأخطاء السابقة..."):
             try:
                 models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
                 target_m = next((m for m in models if "1.5" in m or "flash" in m), models[0])
@@ -115,21 +115,23 @@ if submit and (files_input or (selection == "رابط درايف المباشر"
                         b = io.BytesIO(); p[0].save(b, format='PNG'); payload = b.getvalue()
                     else: payload = compress_image(f_item["content"])
 
-                    # برومبت دقيق جداً لاستخراج البيانات العامة والأصناف
+                    # برومبت مصحح ومشدد جداً على الضريبة، التصنيف، والمعامل
                     prompt = f"""
                     أنت محاسب بيانات خبير. قم بتحليل الفاتورة وإرجاع البيانات بصيغة JSON فقط.
                     يجب أن يحتوي الـ JSON على المفاتيح العامة:
                     "اسم المورد", "رقم الفاتورة / عرض السعر", "الرقم الضريبي للمورد", "رقم السجل التجاري".
                     
-                    ويجب أن يحتوي على مفتاح "الأصناف" وهو قائمة (List) بالمنتجات.
-                    لكل صنف، استخرج: {', '.join(chosen_cols)}
+                    ويجب أن يحتوي على مفتاح "الأصناف" وهو قائمة (List). لكل صنف استخرج: {', '.join(chosen_cols)}
                     
-                    القواعد الحاسمة للأصناف:
-                    1. 'الوحدة الصغيرة': استخرجها من البيان (مثل: كيلو، جرام، لتر).
-                    2. 'معامل التحويل': استنتجه رياضياً من البيان واكتب الرقم النهائي الصافي فقط (مثال: 6*2 = 12، 6*2500 = 15000).
-                    3. 'الكمية بالوحدة الكبيرة': عدد الكراتين أو الكمية الأساسية المذكورة للصنف.
-                    4. 'الإجمالي الصافي': إجمالي المبلغ للصنف كما هو موضح في الفاتورة (مثلاً 5750).
-                    5. 'المادة/اسم المنتج': اسم الصنف نظيف بدون أوزان.
+                    قواعد صارمة جداً (ممنوع الخطأ فيها):
+                    1. 'الضريبة': استخرج **مبلغ الضريبة الفعلي بالريال** لكل صنف (مثال: 862.5)، وإياك أن تستخرج النسبة المئوية (15).
+                    2. 'التصنيف الذكي': صنف المنتج بكلمة واحدة (مثال: معلبات، بهارات، صوصات، زيوت، خدمات). لا تتركها None.
+                    3. 'معامل التحويل': هو **عدد الحبات/العبوات فقط** داخل الكرتون. إياك أن تضرب الأوزان!
+                       - مثال: "باذنجان 6*2500 جرام" -> المعامل هو 6 فقط.
+                       - مثال: "ورق عنب 6*2 كيلو" -> المعامل هو 6 فقط.
+                       - إذا كان الصنف عبوة واحدة (مثل تنكة أو كيس)، فالمعامل 1.
+                    4. 'الوحدة الصغيرة': استخرجها من البيان (حبة، كيلو، جرام، لتر).
+                    5. 'المادة/اسم المنتج': اسم الصنف نظيف بدون أوزان نهائياً.
                     """
                     
                     response = model.generate_content([prompt, {"mime_type": "image/jpeg", "data": payload}])
@@ -138,7 +140,7 @@ if submit and (files_input or (selection == "رابط درايف المباشر"
                     
                     items = data if isinstance(data, list) else data.get('الأصناف', [])
                     
-                    # --- الحل السحري لإجبار ظهور بيانات المورد في كل صف ---
+                    # حقن بيانات المورد لضمان عدم اختفائها
                     general_info = {}
                     if isinstance(data, dict):
                         general_info['اسم المورد'] = data.get('اسم المورد', '')
@@ -147,7 +149,6 @@ if submit and (files_input or (selection == "رابط درايف المباشر"
                         general_info['رقم السجل التجاري'] = data.get('رقم السجل التجاري', '')
                     
                     for item in items:
-                        # حقن بيانات المورد داخل الصنف لتظهر في الجدول
                         for k, v in general_info.items():
                             if k not in item or not str(item.get(k, '')).strip():
                                 item[k] = v
@@ -159,7 +160,7 @@ if submit and (files_input or (selection == "رابط درايف المباشر"
                             qty_large = float(str(item.get('الكمية بالوحدة الكبيرة', 0)).replace(',', ''))
                             
                             item['الكمية'] = qty_large * factor
-                            item['معامل التحويل'] = int(factor) # رقم صافي كما طلبت (12، 15000)
+                            item['معامل التحويل'] = int(factor) # سيكتب 6 بدلاً من 15000
                             
                             item['المادة/اسم المنتج'] = re.sub(r'\d+[\*×]\d+.*|[\d\.]+\s*(جرام|جم|كجم|كيلو|لتر|مل)', '', str(item.get('المادة/اسم المنتج', ''))).strip()
                         except: continue
@@ -168,7 +169,6 @@ if submit and (files_input or (selection == "رابط درايف المباشر"
 
                 if all_extracted_data:
                     df = pd.DataFrame(all_extracted_data)
-                    # ضمان ترتيب الأعمدة وظهور المورد
                     final_cols = [c for c in chosen_cols if c in df.columns]
                     df = df[final_cols]
                     

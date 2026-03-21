@@ -32,7 +32,7 @@ st.markdown("""
     </style>
     
     <div class="title-red">أداة شركة أزواد الذكية</div>
-    <div class="subtitle-gray">تم ضبط تفكيك البيان الأصلي (التعبئة، الأوزان، والكميات المطلوبة) باحترافية</div>
+    <div class="subtitle-gray">اداة خاصة لفريق ازواد لعمليات الجرد والتصنيع والمشتريات</div>
 """, unsafe_allow_html=True)
 
 try:
@@ -68,7 +68,6 @@ with st.container():
     
     st.markdown("### ⚙️ اختر الأعمدة (تم تثبيت الترتيب والبيانات المطلوبة):")
     
-    # تمت إضافة 'الكمية المطلوبة' وعمود 'وحدة الوزن الصغيرة' بدقة
     all_final_cols = [
         'اسم المورد', 'رقم الفاتورة / عرض السعر', 'الرقم الضريبي للمورد', 'رقم السجل التجاري',
         'رقم الصنف', 'المادة/اسم المنتج', 'الكمية المطلوبة', 'الوحدة الكبيرة', 
@@ -118,7 +117,6 @@ if submit and (files_input or (selection == "رابط درايف المباشر"
                         b = io.BytesIO(); p[0].save(b, format='PNG'); payload = b.getvalue()
                     else: payload = compress_image(f_item["content"])
 
-                    # برومبت مصمم خصيصاً لتفكيك التعبئة بناءً على شرحك بالضبط
                     prompt = f"""
                     أنت محاسب مستودعات دقيق. استخرج البيانات بصيغة JSON.
                     يجب أن يحتوي الـ JSON على المفاتيح العامة:
@@ -162,16 +160,13 @@ if submit and (files_input or (selection == "رابط درايف المباشر"
                                 item[k] = v
                                 
                         try:
-                            # 1. تنظيف الأرقام للتأكد من خلوها من النصوص
                             raw_qty_large = re.sub(r'[^0-9.]', '', str(item.get('الكمية بالوحدة الكبيرة', 1)))
                             qty_large = float(raw_qty_large) if raw_qty_large else 1
                             
-                            # 2. الحفاظ على معامل التحويل المكتسب سابقاً
                             small_unit = str(item.get('الوحدة الصغيرة', 'حبة')).strip()
                             large_unit = str(item.get('الوحدة الكبيرة', 'كرتون')).strip()
                             item['معامل التحويل'] = f"{int(qty_large)} {small_unit} / {large_unit}"
                             
-                            # 3. تنظيف اسم المنتج
                             item['المادة/اسم المنتج'] = re.sub(r'\d+[\*×]\d+.*|[\d\.]+\s*(جرام|جم|كجم|كيلو|لتر|مل)', '', str(item.get('المادة/اسم المنتج', ''))).strip()
                         except: continue
                         

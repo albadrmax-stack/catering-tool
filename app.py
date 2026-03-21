@@ -36,7 +36,7 @@ st.markdown("""
     </style>
     
     <div class="title-red">أداة شركة أزواد الذكية</div>
-    <div class="subtitle-gray">استخراج شامل لبيانات المورد، السجل التجاري، والارقام الضريبية بدقة</div>
+    <div class="subtitle-gray">استخراج شامل ودقيق للبيانات - تنظيف ذكي لاسم المنتج</div>
 """, unsafe_allow_html=True)
 
 def compress_image(image_bytes):
@@ -50,7 +50,7 @@ def get_drive_id(url):
     return m.group(1) if m else None
 
 # --- واجهة الإدخال ---
-with st.form("azwad_master_form"):
+with st.form("azwad_final_form"):
     selection = st.radio("طريقة الإدخال", ["ارفع ملف / ملفات", "التقاط صورة / صور", "رابط قوقل درايف"], horizontal=True)
     
     files_input = None
@@ -94,7 +94,7 @@ if submit and (files_input or (selection == "رابط قوقل درايف" and d
         for f in files_input: final_files.append({"name": f.name, "content": f.read(), "type": f.type})
 
     if final_files:
-        with st.spinner("جاري استخراج البيانات والارقام الضريبية..."):
+        with st.spinner("جاري استخراج البيانات وتنظيف اسم المنتج بذكاء..."):
             try:
                 gen_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
                 target_m = next((m for m in gen_models if "1.5" in m or "flash" in m), gen_models[0])
@@ -105,14 +105,15 @@ if submit and (files_input or (selection == "رابط قوقل درايف" and d
                     if "pdf" in f_item["type"]:
                         p = pdf2image.convert_from_bytes(f_item["content"])
                         b = io.BytesIO(); p[0].save(b, format='PNG'); payload = b.getvalue()
-                    else: payload = compress_image(f_item["content"])
+                    else: payload = compress_image(f_data := f_item["content"])
 
-                    # التعليمات البرمجية المحدثة للذكاء الاصطناعي
+                    # التعليمات البرمجية الصارمة للذكاء الاصطناعي لتنظيف اسم المنتج
                     prompt = f"""
-                    استخرج البيانات التالية بدقة من الفاتورة في قالب JSON بأسماء الحقول المذكورة تماماً:
+                    أنت خبير تدقيق مالي. استخرج البيانات التالية بدقة من الفاتورة في قالب JSON بأسماء الحقول المذكورة تماماً.
+                    ركز جيداً على التعليمات التالية:
+                    - 'المادة/اسم المنتج': استخرج اسم المنتج فقط وصافياً تماماً. يجب ألا يحتوي هذا الحقل على أي أرقام أو أوزان (مثلاً '2*6 كيلو' أو '145 جم').
                     - 'رقم الفاتورة / عرض السعر': ابحث عنه في ترويسة الفاتورة.
-                    - 'الرقم الضريبي للمورد': الرقم المكون من 15 خانة غالباً.
-                    - 'رقم السجل التجاري': رقم السجل التجاري للشركة الموردة.
+                    - 'الرقم الضريبي للمورد': الرقم المكون من 15 خانة.
                     - باقي الحقول المطلوبة: {', '.join(chosen_cols)}
                     يجب أن تكون النتيجة قائمة JSON تحت مفتاح 'الأصناف'.
                     """
@@ -121,6 +122,24 @@ if submit and (files_input or (selection == "رابط قوقل درايف" and d
                     data_txt = response.text.strip().replace('```json', '').replace('```', '')
                     data = json.loads(data_txt)
                     items = data if isinstance(data, list) else data.get('الأصناف', [])
+                    all_extracted_data = items
+                    
+                    # تنظيف برمي نهائي احتياطي في لغة بايثون
+                    def clean_product_name(text):
+                        if text:
+                            text = text.strip()
+                            # إزالة الأنماط الشائعة مثل "أرقام * أرقام كيلو" أو "أرقام جم"
+                            text = re.sub(r'\d+(\*|\×)\d+(\s*[أإآا]?[كك]يلو?|[كك]غ?|\s*جم?)', '', text, flags=re.IGNORECASE)
+                            # إزالة الأرقام المفردة في نهاية السلسلة
+                            text = re.sub(r'\s*\d+\s*[أإآا]?[كك]يلو?|\d+\s*[كك]غ?|\d+\s*جم?$', '', text, flags=re.IGNORECASE)
+                            text = text.strip()
+                        return text
+
+                    # تطبيق التنظيف النهائي على عمود المادة/اسم المنتج
+                    for item in items:
+                        if 'المادة/اسم المنتج' in item:
+                            item['المادة/اسم المنتج'] = clean_product_name(item['المادة/اسم المنتج'])
+                    
                     results.extend(items)
 
                 if results:
@@ -128,13 +147,13 @@ if submit and (files_input or (selection == "رابط قوقل درايف" and d
                     # ضمان الترتيب الذي اختاره المستخدم
                     df = df[[c for c in chosen_cols if c in df.columns]]
                     
-                    st.success("✅ تم الاستخراج والتدقيق بنجاح!")
+                    st.success("✅ تم الاستخراج وتنظيف البيانات بنجاح تام!")
                     st.dataframe(df, use_container_width=True)
                     
                     out = io.BytesIO()
                     with pd.ExcelWriter(out, engine='xlsxwriter') as wr:
                         df.to_excel(wr, index=False, sheet_name='أزواد')
                         wr.sheets['أزواد'].right_to_left()
-                    st.download_button("⬇️ تحميل التقرير الشامل", out.getvalue(), "Azwad_Master_Report.xlsx")
+                    st.download_button("⬇️ تحميل تقرير شركة أزواد الشامل والمنظف", out.getvalue(), "Azwad_Clean_Master_Report.xlsx")
             except Exception as e:
                 st.error(f"حدث خطأ: {e}")

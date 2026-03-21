@@ -104,7 +104,7 @@ if submit and (files_input or (selection == "رابط درايف المباشر"
         for f in input_list: final_files.append({"name": f.name, "content": f.read(), "type": f.type})
 
     if final_files:
-        with st.spinner("جاري تحليل البيانات وتوحيد الأوزان (الجرام إلى كيلو)..."):
+        with st.spinner("جاري تحليل البيانات")..."):
             try:
                 models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
                 target_m = next((m for m in models if "1.5" in m or "flash" in m), models[0])
@@ -204,6 +204,6 @@ if submit and (files_input or (selection == "رابط درايف المباشر"
                     with pd.ExcelWriter(out, engine='xlsxwriter') as wr:
                         df.to_excel(wr, index=False, sheet_name='أزواد Master')
                         wr.sheets['أزواد Master'].right_to_left()
-                    st.download_button("⬇️ تحميل تقرير أزواد الشامل والمنظف", out.getvalue(), "Azwad_Master_Report.xlsx")
+                    st.download_button("⬇️ تحميل ملف اكسل", out.getvalue(), "Azwad_Master_Report.xlsx")
             except Exception as e:
                 st.error(f"حدث خطأ: {e}")

@@ -62,4 +62,62 @@ if uploaded_files:
                     'الكمية_بالفاتورة'
                     'السعر'
 
-                    أر
+                    أريد النتيجة كـ JSON خام فقط كإجابة نصية، بدون كلام جانبي أو علامات Markdown (لا تستخدم ```json).
+                    """
+                    
+                    response = model.generate_content([prompt, img])
+                    text_result = response.text.strip()
+
+                    try:
+                        cleaned_json_text = text_result.replace('```json', '').replace('```', '').strip()
+                        data_json = json.loads(cleaned_json_text)
+                        
+                        if 'الأصناف' in data_json:
+                            all_invoices_data.extend(data_json['الأصناف'])
+                            st.success(f"✅ تم سحب البيانات بنجاح من: {uploaded_file.name}")
+                        else:
+                            st.warning(f"⚠️ لم نتمكن من استخراج جدول من: {uploaded_file.name}")
+
+                    except json.JSONDecodeError:
+                        st.warning(f"⚠️ لم يستطع الذكاء الاصطناعي تنسيق بيانات الفاتورة: {uploaded_file.name}")
+                    
+                except Exception as e:
+                    st.error(f"⚠️ حدث خطأ أثناء قراءة {uploaded_file.name}: {str(e)}")
+
+        if all_invoices_data:
+            st.markdown("### 📊 الجدول النهائي المجمع لجميع الفواتير:")
+            df = pd.DataFrame(all_invoices_data)
+            
+            # تحديث قاموس الأسماء ليحتوي على الأعمدة الجديدة
+            excel_columns_map = {
+                'اسم_المورد': 'اسم المورد',
+                'رقم_الصنف': 'رقم الصنف',
+                'المادة': 'المادة/اسم المنتج',
+                'الوحدة_الصغيرة': 'الوحدة',
+                'وزن_الحبة': 'وزن الحبة',
+                'معامل_التحويل_في_الكرتون': 'معامل التحويل (حبة/كرتون)',
+                'الوحدة_الرئيسية': 'الوحدة الكبيرة',
+                'الكمية_بالفاتورة': 'الكمية (بالكرتون)',
+                'السعر': 'السعر الإجمالي'
+            }
+            df.rename(columns=excel_columns_map, inplace=True)
+            
+            # الترتيب الجديد للأعمدة كما طلبت في الصورة (المادة -> الوحدة -> وزن الحبة)
+            cols_order = ['اسم المورد', 'رقم الصنف', 'المادة/اسم المنتج', 'الوحدة', 'وزن الحبة', 'معامل التحويل (حبة/كرتون)', 'الوحدة الكبيرة', 'الكمية (بالكرتون)', 'السعر الإجمالي']
+            existing_cols = [c for c in cols_order if c in df.columns]
+            df = df[existing_cols]
+            
+            st.dataframe(df, use_container_width=True)
+
+            excel_io = io.BytesIO()
+            with pd.ExcelWriter(excel_io, engine='xlsxwriter') as writer:
+                df.to_excel(writer, index=False, sheet_name='فواتير_أزواد')
+            
+            st.download_button(
+                label="تحميل اكسل",
+                data=excel_io.getvalue(),
+                file_name="فواتير_أزواد_المجمعة.xlsx",
+                mime="application/vnd.ms-excel"
+            )
+    else:
+        st.error("❌ لم نتمكن من العثور على محرك مناسب في حسابك.")

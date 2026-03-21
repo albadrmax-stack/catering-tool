@@ -104,7 +104,7 @@ if submit and (files_input or (selection == "رابط درايف المباشر"
         for f in input_list: final_files.append({"name": f.name, "content": f.read(), "type": f.type})
 
     if final_files:
-        with st.spinner("جاري تحليل البيانات وتوحيد الأوزان (الجرام إلى كيلو)..."):
+        with st.spinner("جاري تحليل البيانات..."):
             try:
                 models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
                 target_m = next((m for m in models if "1.5" in m or "flash" in m), models[0])

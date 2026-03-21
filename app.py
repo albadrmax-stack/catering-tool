@@ -6,18 +6,17 @@ from PIL import Image
 import pdf2image
 import json
 
-# دالة ذكية لتصغير حجم الصورة مع الحفاظ على جودة النص
+# دالة ذكية لتصغير حجم الصورة مع الحفاظ على جودة النص (لتسريع المعالجة)
 def compress_image(image_bytes, quality=70):
     """تصغير الصورة لتسريع المعالجة."""
     img = Image.open(io.BytesIO(image_bytes))
     if img.mode != 'RGB':
         img = img.convert('RGB')
-    
     output = io.BytesIO()
-    # حفظ الصورة بتنسيق JPEG مع تحديد الجودة
     img.save(output, format='JPEG', quality=quality)
     return output.getvalue()
 
+# 1. عنوان الموقع بالعربية
 st.set_page_config(page_title="أداة أزواد الذكية لمسح المستندات والصور وتحويلها اكسل", layout="wide")
 st.title("أداة أزواد الذكية لمسح المستندات والصور وتحويلها اكسل")
 
@@ -28,21 +27,62 @@ except Exception as e:
     st.error("❌ لم يتم العثور على المفتاح السري.")
     st.stop()
 
-# --- خيارات الرفع والتقاط الصورة الجديدة ---
+# --- 2. تصميم الأزرار الملونة والمنفصلة بالعربية ---
+st.markdown("### ✨ خيارات الرفع (اختر واحداً للبدء):")
+
+# قائمة لتجميع كل الملفات المرفوعة من أي خيار
 uploaded_files = []
 
-st.markdown("### ✨ خيارات الرفع (اختر واحداً):")
-col1, col2 = st.columns(2)
+# استخدام pills لإنشاء أزرار اختيار كبيرة وملونة
+selection = st.pills(
+    label="اختر طريقة الرفع:",
+    options=["الرفع", "الالتقاط"],
+    icons=["📁", "📸"],
+    format_func=lambda x: "ارفع الملف / الملفات" if x == "الرفع" else "التقاط صورة / صور",
+    label_visibility="collapsed"
+)
 
-with col1:
-    file_upload = st.file_uploader("ارفع ملف (PDF/صور)", type=["pdf", "png", "jpg", "jpeg"])
-    if file_upload:
-        uploaded_files.append(file_upload)
+# تخصيص ألوان الأزرار باستخدام CSS (أحمر للرفع، كحلي للالتقاط)
+st.markdown("""
+<style>
+/* لون زر الرفع (الأحمر) */
+[data-testid="stPills"] button:nth-child(1) {
+    background-color: #ff4b4b !important;
+    color: white !important;
+    border: 2px solid #ff4b4b !important;
+}
+[data-testid="stPills"] button:nth-child(1):hover {
+    background-color: #ff3333 !important;
+}
+/* لون زر الالتقاط (الكحلي) */
+[data-testid="stPills"] button:nth-child(2) {
+    background-color: #1a2a40 !important;
+    color: white !important;
+    border: 2px solid #1a2a40 !important;
+}
+[data-testid="stPills"] button:nth-child(2):hover {
+    background-color: #2a3a50 !important;
+}
+/* تنسيق الأزرار لتكون كبيرة وواضحة */
+[data-testid="stPills"] button {
+    font-size: 1.2rem !important;
+    padding: 10px 20px !important;
+}
+</style>
+""", unsafe_allow_html=True)
 
-with col2:
-    camera_capture = st.camera_input("التقط صورة مباشرة للكاميرا")
-    if camera_capture:
-        uploaded_files.append(camera_capture)
+# تفعيل الخيار المختار
+if selection == "الرفع":
+    # 3. قبول رفع متعدد الملفات
+    file_uploads = st.file_uploader("ارفع الملف / الملفات (PDF/صور)", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True)
+    if file_uploads:
+        uploaded_files.extend(file_uploads)
+
+elif selection == "الالتقاط":
+    # 4. الكاميرا لا تعمل تلقائياً، وتدعم التقاط صور متعددة
+    camera_captures = st.camera_input("التقاط صورة / صور مباشرة للكاميرا", accept_multiple_files=True)
+    if camera_captures:
+        uploaded_files.extend(camera_captures)
 
 if uploaded_files:
     with st.spinner("جاري الاتصال بجوجل وفحص المحركات... 🔍"):
@@ -68,19 +108,17 @@ if uploaded_files:
             file_name = uploaded_file.name
             with st.spinner(f'جاري معالجة وتحليل فاتورة: {file_name}...'):
                 try:
-                    # قراءة محتوى الملف أولاً لفحصه
                     file_content = uploaded_file.read()
                     
                     if uploaded_file.type == "application/pdf":
                         images = pdf2image.convert_from_bytes(file_content)
                         img = images[0]
-                        # PDF لا نحتاج لضغطه لأنه ليس صورة خام، بل محتوى
                         img_bytes = io.BytesIO()
                         img.save(img_bytes, format='PNG')
                         img_to_send = img_bytes.getvalue()
 
                     else:
-                        # هذا الجزء السحري لضغط الصور الكبيرة تلقائياً
+                        # تصغير الصورة تلقائياً لتسريع المعالجة
                         st.info(f"تنبيه: حجم الملف الأصلي: {len(file_content)/1024/1024:.2f} ميجا. جاري تصغير الحجم تلقائياً لتسريع المعالجة...")
                         compressed_content = compress_image(file_content)
                         st.success(f"✅ تم تصغير حجم الملف إلى: {len(compressed_content)/1024/1024:.2f} ميجا.")

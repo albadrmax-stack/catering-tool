@@ -11,39 +11,29 @@ import re
 # إعداد الصفحة
 st.set_page_config(page_title="أداة شركة أزواد الذكية", layout="wide")
 
-# التنسيق البصري
+if 'cols_order' not in st.session_state:
+    st.session_state.cols_order = [
+        'اسم المورد', 'رقم الفاتورة / عرض السعر', 'رقم الصنف', 'المادة/اسم المنتج', 
+        'الوحدة الصغيرة', 'الكمية', 'الوحدة الكبيرة', 'معامل التحويل', 
+        'الكمية بالوحدة الكبيرة', 'السعر الافرادي', 'البيان الأصلي', 'التصنيف الذكي', 'الضريبة', 'الإجمالي الصافي'
+    ]
+
 st.markdown("""
     <style>
-    .title-red { color: #ff4b4b; font-size: 3rem; font-weight: 900; text-align: center; }
-    .stButton > button { background-color: #ff4b4b !important; color: white !important; width: 100% !important; }
+    .stApp { align-items: center; display: flex; justify-content: center; }
+    .main .block-container { max-width: 1150px; padding-top: 2rem; text-align: center; }
+    .title-red { color: #ff4b4b; font-size: 3rem; font-weight: 900; margin-bottom: 0px; }
+    .stButton > button { background-color: #ff4b4b !important; color: white !important; width: 100% !important; border-radius: 10px !important; font-size: 1.2rem; }
     </style>
     <div class="title-red">أداة شركة أزواد الذكية</div>
-    <div style="text-align: center; color: gray;">نسخة معالجة الصور الضخمة (JPG)</div>
+    <div style="text-align: center; color: gray; margin-bottom: 20px;">نظام استخراج وتحليل الفواتير - النسخة المعتمدة المستقرة</div>
 """, unsafe_allow_html=True)
 
-# دالة ضغط الصور المحسنة (للتعامل مع الصور الضخمة)
-def process_invoice_image(image_bytes):
-    # فتح الصورة باستخدام PIL
+# دالة ضغط الصور الأساسية
+def compress_image(image_bytes):
     img = Image.open(io.BytesIO(image_bytes))
-    
-    # 1. تحويل الـ PNG إلى JPG (لتقليل الحجم بشكل كبير)
-    if img.mode != 'RGB':
-        img = img.convert('RGB')
-        
-    # 2. تغيير الحجم الاحتياطي (إذا كانت دقة الصورة خيالية، نقوم بتصغيرها قليلاً)
-    # الأبعاد القصوى المقترحة هي 2000 بكسل لأطول ضلع، للحفاظ على الوضوح
-    max_size = 2000
-    w, h = img.size
-    if w > max_size or h > max_size:
-        # حساب نسبة التصغير مع الحفاظ على النسبة
-        scale = max_size / max(w, h)
-        new_size = (int(w * scale), int(h * scale))
-        img = img.resize(new_size, Image.Resampling.LANCZOS)
-    
-    # 3. حفظ الصورة كـ JPEG مع جودة محسنة
-    out = io.BytesIO()
-    # جودة 80 تعتبر توازناً مثالياً بين الوضوح والحجم
-    img.save(out, format='JPEG', quality=80)
+    if img.mode != 'RGB': img = img.convert('RGB')
+    out = io.BytesIO(); img.save(out, format='JPEG', quality=85)
     return out.getvalue()
 
 # إعداد الـ API
@@ -51,94 +41,85 @@ try:
     api_key = st.secrets["GEMINI_API_KEY"]
     genai.configure(api_key=api_key)
 except:
-    st.error("❌ خطأ: لم يتم العثور على API KEY في الإعدادات.")
+    st.error("❌ تأكد من إعداد المفتاح السري في Settings > Secrets")
     st.stop()
 
-# واجهة الاختيارات
+# واجهة الإدخال
 selection = st.radio("طريقة الإدخال", ["ارفع ملف / ملفات", "التقاط صورة / صور", "رابط قوقل درايف"], horizontal=True)
 
-all_options = [
-    'اسم المورد', 'رقم الفاتورة / عرض السعر', 'رقم الصنف', 'المادة/اسم المنتج', 
-    'الوحدة الصغيرة', 'الكمية', 'الوحدة الكبيرة', 'معامل التحويل', 
-    'الكمية بالوحدة الكبيرة', 'السعر الافرادي', 'البيان الأصلي', 'التصنيف الذكي', 'الضريبة', 'الإجمالي الصافي'
-]
+all_options = st.session_state.cols_order
+chosen_cols = st.multiselect("رتب الأعمدة المختارة بسحبها أو اختيارها:", options=all_options, default=st.session_state.cols_order)
 
-chosen_cols = st.multiselect("اختر ورتب الأعمدة المطلوبة:", options=all_options, default=all_options[:9])
-
-with st.form("azwad_image_fix_form"):
+with st.form("azwad_stable_form"):
     files_input = None
-    drive_url = ""
-    
     if selection == "ارفع ملف / ملفات":
-        files_input = st.file_uploader("اسحب الملفات هنا", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True)
+        files_input = st.file_uploader("", type=["pdf", "png", "jpg", "jpeg"], accept_multiple_files=True)
     elif selection == "التقاط صورة / صور":
-        files_input = st.camera_input("التقط صورة")
+        cam_raw = st.camera_input("")
+        if cam_raw: files_input = [cam_raw]
     elif selection == "رابط قوقل درايف":
-        drive_url = st.text_input("رابط درايف المباشر")
+        d_url = st.text_input("أدخل رابط درايف المباشر:")
 
-    submit = st.form_submit_button("🚀 ابدأ التحليل الآن")
+    submit = st.form_submit_button("🚀 ابدأ الاستخراج والتحليل")
 
-# التنفيذ
 if submit:
-    if not files_input and not drive_url:
-        st.warning("⚠️ الرجاء اختيار ملف أو وضع رابط أولاً.")
+    final_files = []
+    if selection == "رابط قوقل درايف" and d_url:
+        fid = re.search(r"(?:id=|\/d\/|folders\/)([a-zA-Z0-9-_]+)", d_url)
+        if fid:
+            r = requests.get(f"https://docs.google.com/uc?export=download&id={fid.group(1)}")
+            if r.status_code == 200: final_files.append({"name": "drive.jpg", "content": r.content, "type": "image/jpeg"})
+    elif files_input:
+        input_list = [files_input] if not isinstance(files_input, list) else files_input
+        for f in input_list: final_files.append({"name": f.name, "content": f.read(), "type": f.type})
+
+    if not final_files:
+        st.warning("⚠️ الرجاء اختيار ملف أولاً.")
     else:
-        results = []
-        status_box = st.empty()
-        
-        try:
-            # 1. صيد الموديل
-            models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-            target_m = next((m for m in models if "1.5" in m or "flash" in m), models[0])
-            model = genai.GenerativeModel(target_m)
-
-            # 2. تجهيز الملفات
-            final_list = []
-            # ... منطق درايف ... (كما هو)
-
-            # تجهيز الملفات المرفوعة
-            input_list = [files_input] if not isinstance(files_input, list) else files_input
-            for f in input_list:
-                final_list.append({"name": f.name, "content": f.read(), "type": f.type})
-
-            # 3. المعالجة
-            for f_item in final_list:
-                status_box.info(f"⏳ جاري تجهيز الملف للتحليل: {f_item['name']}...")
+        with st.spinner("جاري تحليل البيانات..."):
+            try:
+                # صيد الموديل التلقائي
+                models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+                target_m = next((m for m in models if "1.5" in m or "flash" in m), models[0])
+                model = genai.GenerativeModel(target_m)
                 
-                # استخدام دالة معالجة الصور المحسنة (لJPG و PNG الكبيرة)
-                if "pdf" in f_item["type"]:
-                    # منطق PDF يحتاج لPoppler (الرسالة السابقة)
-                    pass
-                else:
-                    payload = process_invoice_image(f_item["content"])
+                all_extracted = []
+                for f_item in final_files:
+                    # معالجة الـ PDF أو الصور
+                    if "pdf" in f_item["type"]:
+                        pages = pdf2image.convert_from_bytes(f_item["content"])
+                        b = io.BytesIO(); pages[0].save(b, format='PNG'); payload = b.getvalue()
+                    else:
+                        payload = compress_image(f_item["content"])
 
-                status_box.info(f"🧠 الذكاء الاصطناعي يحلل الفاتورة...")
-                
-                prompt = f"""
-                حلل الفاتورة واستخرج الأصناف في JSON. المطلوب: {', '.join(chosen_cols)}.
-                اسم المنتج يجب أن يكون بدون أرقام أو أوزان. الضريبة مبلغ مالي. 
-                الكمية الإجمالية = الكرتون × معامل التحويل.
-                """
-                
-                response = model.generate_content([prompt, {"mime_type": "image/jpeg", "data": payload}])
-                data_txt = response.text.strip().replace('```json', '').replace('```', '')
-                data = json.loads(data_txt)
-                items = data if isinstance(data, list) else data.get('الأصناف', [])
-                results.extend(items)
+                    prompt = f"""
+                    استخرج البيانات من الفاتورة في قالب JSON بأسماء الحقول المذكورة: {', '.join(chosen_cols)}
+                    القواعد:
+                    - المادة/اسم المنتج: بدون أرقام أو أوزان.
+                    - الضريبة: المبلغ المالي بالريال.
+                    - معامل التحويل: الرقم المستنتج (مثل 6 أو 12).
+                    - الكمية = (الكمية بالوحدة الكبيرة × معامل التحويل).
+                    """
+                    
+                    response = model.generate_content([prompt, {"mime_type": "image/jpeg", "data": payload}])
+                    data = json.loads(response.text.strip().replace('```json', '').replace('```', ''))
+                    items = data if isinstance(data, list) else data.get('الأصناف', [])
+                    
+                    # تنظيف اسم المادة برمجياً لضمان الدقة
+                    for it in items:
+                        if 'المادة/اسم المنتج' in it:
+                            it['المادة/اسم المنتج'] = re.sub(r'\d+[\*×]\d+.*|[\d\.]+\s*(جرام|جم|كجم|كيلو|لتر|مل)', '', str(it['المادة/اسم المنتج'])).strip()
+                    all_extracted.extend(items)
 
-            if results:
-                status_box.success("✅ اكتمل التحليل!")
-                df = pd.DataFrame(results)
-                df = df[[c for c in chosen_cols if c in df.columns]]
-                st.dataframe(df, use_container_width=True)
-                
-                out = io.BytesIO()
-                with pd.ExcelWriter(out, engine='xlsxwriter') as wr:
-                    df.to_excel(wr, index=False, sheet_name='أزواد')
-                    wr.sheets['أزواد'].right_to_left()
-                st.download_button("⬇️ تحميل التقرير النهائي", out.getvalue(), "Azwad_Report.xlsx")
-            else:
-                status_box.error("❌ لم نتمكن من استخراج بيانات. الصورة قد تكون غير واضحة للذكاء.")
-
-        except Exception as e:
-            status_box.error(f"❌ حدث خطأ تقني: {e}")
+                if all_extracted:
+                    df = pd.DataFrame(all_extracted)
+                    df = df[[c for c in chosen_cols if c in df.columns]]
+                    st.success("✅ تم استخراج البيانات بنجاح!")
+                    st.dataframe(df, use_container_width=True)
+                    
+                    out = io.BytesIO()
+                    with pd.ExcelWriter(out, engine='xlsxwriter') as wr:
+                        df.to_excel(wr, index=False, sheet_name='أزواد'); wr.sheets['أزواد'].right_to_left()
+                    st.download_button("⬇️ تحميل ملف الإكسل", out.getvalue(), "Azwad_Final.xlsx")
+            except Exception as e:
+                st.error(f"حدث خطأ: {e}")

@@ -66,22 +66,26 @@ with st.container():
 
     st.markdown("---")
     
-    st.markdown("### ⚙️ اختر الأعمدة (تم تنظيف التكرارات ومطابقة الإكسل):")
+    st.markdown("### ⚙️ اختر الأعمدة (تم تثبيت الترتيب والبيانات المطلوبة):")
     
-    # القائمة الموحدة والمنظفة نهائياً بناءً على طلبك
-    clean_excel_cols = [
+    # الأعمدة الجديدة المطابقة للإكسل بالضبط
+    excel_cols = [
         '#', 'اسم الصنف', 'التصنيف', 'رمز المادة', 'سعر المادة (ر.س)', 
-        'اسم الشركة / المورد', 'الالرقم الضريبي', 'رقم السجل التجاري', 
+        'اسم الشركة / المورد', 'الرقم الضريبي', 'رقم السجل التجاري', 
         'رقم الهاتف', 'البريد الإلكتروني', 'عنوان المورد', 
         'الوحدة الكبيرة', 'الوحدة الصغيرة', 'معامل التحويل', 
         'وزن الوحدة الصغيرة (كجم)'
     ]
     
-    # أي أعمدة إضافية ضرورية للحسابات تظل هنا ولا تظهر للمستخدم إلا إذا طلبها
-    optional_cols = ['الكمية المطلوبة', 'الضريبة', 'الإجمالي الصافي', 'رقم الفاتورة / عرض السعر', 'البيان الأصلي']
+    # الأعمدة الإضافية في حال رغبتم في إظهارها من جديد لاحقاً
+    extra_cols = [
+        'الكمية المطلوبة', 'الكمية بالوحدة الكبيرة', 'الكمية بالوحدة الصغيرة', 
+        'وحدة الوزن الصغيرة', 'رقم الفاتورة / عرض السعر', 'البيان الأصلي', 
+        'الضريبة', 'الإجمالي الصافي'
+    ]
     
-    all_final_cols = clean_excel_cols + optional_cols
-    default_on = clean_excel_cols.copy()
+    all_final_cols = excel_cols + extra_cols
+    default_on = excel_cols.copy() # الافتراضي سيكون فقط المطابق للإكسل!
     
     chosen_cols = st.multiselect(
         "رتب الأعمدة بسحبها أو اختيارها بالترتيب المطلوب:", 
@@ -94,19 +98,21 @@ with st.container():
 
 if submit and (files_input or (selection == "رابط درايف المباشر" and d_url)):
     final_files = []
-    input_list = [files_input] if not isinstance(files_input, list) and files_input else files_input
-    if selection == "رابط درايف المباشر" and d_url:
+    if selection == "رابط درايف المباشر":
         fid = get_drive_id(d_url)
         if fid:
-            r = requests.get(f"https://docs.google.com/uc?export=download&id={fid}")
+            r = requests.get(f"https://docs.google.com/uc?export=download&id={fid.group(1)}")
             if r.status_code == 200: final_files.append({"name": "drive.jpg", "content": r.content, "type": "image/jpeg"})
-    elif input_list:
+    else:
+        input_list = [files_input] if not isinstance(files_input, list) else files_input
         for f in input_list: final_files.append({"name": f.name, "content": f.read(), "type": f.type})
 
     if final_files:
-        with st.spinner("جاري استخراج البيانات وحقن بيانات الترويسة في كل سطر..."):
+        with st.spinner("جاري تحليل البيانات ومطابقتها مع نموذج الإكسل الجديد..."):
             try:
-                model = genai.GenerativeModel("gemini-1.5-flash")
+                models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+                target_m = next((m for m in models if "1.5" in m or "flash" in m), models[0])
+                model = genai.GenerativeModel(target_m)
                 
                 all_extracted_data = []
                 for f_item in final_files:
@@ -115,72 +121,105 @@ if submit and (files_input or (selection == "رابط درايف المباشر"
                         b = io.BytesIO(); p[0].save(b, format='PNG'); payload = b.getvalue()
                     else: payload = compress_image(f_item["content"])
 
-                    # برومبت ذكي يركز على استخراج الترويسة بشكل منفصل ثم حقنها
-                    prompt = f"""
-                    استخرج البيانات من الفاتورة بصيغة JSON:
-                    1. بيانات الترويسة (Header): استخرج بدقة (اسم الشركة / المورد، الرقم الضريبي، رقم السجل التجاري، رقم الهاتف، البريد الإلكتروني، عنوان المورد).
-                    2. بيانات الأصناف (Table): استخرج لكل صنف (اسم الصنف، التصنيف، رمز المادة، سعر المادة (ر.س)، الوحدة الكبيرة، الوحدة الصغيرة، الكمية بالوحدة الكبيرة، الكمية بالوحدة الصغيرة، وحدة الوزن الصغيرة، الضريبة، الإجمالي الصافي).
+                    # استبعاد عمود الترقيم التلقائي من البرومبت ليتم إنشاؤه برمجياً
+                    prompt_cols = [c for c in chosen_cols if c != '#']
                     
-                    قواعد هامة:
-                    - 'التصنيف': كلمة واحدة.
-                    - 'الوحدة الصغيرة': الأصل "علبة" أو "جالون".
+                    prompt = f"""
+                    أنت محاسب مستودعات دقيق. استخرج البيانات بصيغة JSON.
+                    يجب أن يحتوي الـ JSON على المفاتيح العامة (تستخرج مرة واحدة للفاتورة):
+                    "اسم الشركة / المورد" (بالعربي حصراً)، "الرقم الضريبي"، "رقم السجل التجاري"، "رقم الهاتف"، "البريد الإلكتروني"، "عنوان المورد".
+                    
+                    ومفتاح "الأصناف" يحتوي على القائمة. استخرج لكل صنف: {', '.join(prompt_cols)}
+                    بالإضافة إلى المفاتيح المساعدة التالية (يجب استخراجها دائماً للحسابات): "الكمية بالوحدة الكبيرة", "الكمية بالوحدة الصغيرة", "وحدة الوزن الصغيرة".
+                    
+                    قواعد تفكيك البيان الأصلي (هام جداً ولا تقبل الخطأ):
+                    1. تحليل التعبئة من البيان (مثال "بديل ليمون 12*1 لتر"):
+                       - 'الكمية بالوحدة الكبيرة': الرقم الأول في التعبئة.
+                       - 'الكمية بالوحدة الصغيرة': الرقم الثاني في التعبئة.
+                       - 'وحدة الوزن الصغيرة': وحدة القياس. (ملاحظة ذكية: اقل وزن هو كيلو او لتر. اذا كان الجرام اكتبه ليتم تحويله).
+                       - 'الوحدة الصغيرة': **الأصل في العبوات هو "علبة" (للأشياء الجامدة)، وللسوائل "جالون"**، إلا إذا نَص البيان صراحة على شيء مختلف.
+                       - 'الوحدة الكبيرة': العبوة الخارجية (مثال: كرتون).
+                    2. إذا كان الصنف وزناً كلياً بدون ضرب (مثل "طحينة 15 كيلو"):
+                       - 'الكمية بالوحدة الكبيرة': 1.
+                       - 'الكمية بالوحدة الصغيرة': 15.
+                       - 'وحدة الوزن الصغيرة': كيلو.
+                       - 'الوحدة الصغيرة': علبة (أو تنكة إذا ذُكرت).
+                    3. 'التصنيف': يجب أن يكون كلمة واحدة فقط لا غير (مثال: معلبات، صوصات، بهارات، زيوت، خدمات). يُمنع كتابة كلمتين.
+                    4. 'اسم الصنف': اسم الصنف نظيف بدون أرقام أو أوزان.
+                    5. 'رمز المادة': رقم الصنف أو كود المادة المكتوب في الفاتورة.
+                    6. 'سعر المادة (ر.س)': السعر الافرادي للصنف.
                     """
                     
                     response = model.generate_content([prompt, {"mime_type": "image/jpeg", "data": payload}])
                     res_text = response.text.strip().replace('```json', '').replace('```', '').strip()
                     data = json.loads(res_text)
                     
-                    items = data.get('الأصناف', data if isinstance(data, list) else [])
+                    items = data if isinstance(data, list) else data.get('الأصناف', [])
                     
-                    # استخراج بيانات الترويسة لضمان حقنها
-                    header = {
-                        'اسم الشركة / المورد': data.get('اسم الشركة / المورد', ''),
-                        'الالرقم الضريبي': data.get('الرقم الضريبي', ''),
-                        'رقم السجل التجاري': data.get('رقم السجل التجاري', ''),
-                        'رقم الهاتف': data.get('رقم الهاتف', ''),
-                        'البريد الإلكتروني': data.get('البريد الإلكتروني', ''),
-                        'عنوان المورد': data.get('عنوان المورد', '')
-                    }
+                    general_info = {}
+                    if isinstance(data, dict):
+                        general_info['اسم الشركة / المورد'] = data.get('اسم الشركة / المورد', data.get('اسم المورد', ''))
+                        general_info['الرقم الضريبي'] = data.get('الرقم الضريبي', data.get('الرقم الضريبي للمورد', ''))
+                        general_info['رقم السجل التجاري'] = data.get('رقم السجل التجاري', '')
+                        general_info['رقم الهاتف'] = data.get('رقم الهاتف', '')
+                        general_info['البريد الإلكتروني'] = data.get('البريد الإلكتروني', '')
+                        general_info['عنوان المورد'] = data.get('عنوان المورد', '')
                     
                     for item in items:
-                        # حقن بيانات الترويسة في كل صنف
-                        for key, value in header.items():
-                            item[key] = value
-                            
-                        # الحسابات والتحويلات المعتادة
-                        try:
-                            q_big = float(str(item.get('الكمية بالوحدة الكبيرة', 1)).replace(',', ''))
-                            q_small = float(str(item.get('الكمية بالوحدة الصغيرة', 0)).replace(',', ''))
-                            u_small = str(item.get('الوحدة الصغيرة', 'علبة'))
-                            u_big = str(item.get('الوحدة الكبيرة', 'كرتون'))
-                            item['معامل التحويل'] = f"{int(q_big)} {u_small} / {u_big}"
-                            
-                            # تحويل الوزن (جرام -> كيلو)
-                            w_unit = str(item.get('وحدة الوزن الصغيرة', '')).strip()
-                            if any(x in w_unit for x in ['جرام', 'جم', 'g']):
-                                item['وزن الوحدة الصغيرة (كجم)'] = q_small / 1000
-                            else:
-                                item['وزن الوحدة الصغيرة (كجم)'] = q_small
+                        for k, v in general_info.items():
+                            if k not in item or not str(item.get(k, '')).strip():
+                                item[k] = v
                                 
-                            item['اسم الصنف'] = re.sub(r'\d+[\*×]\d+.*|[\d\.]+\s*(جرام|جم|كجم|كيلو|لتر|مل)', '', str(item.get('اسم الصنف', ''))).strip()
-                        except: pass
+                        try:
+                            # 1. تنظيف الرقم الكبير لمعامل التحويل
+                            raw_qty_large = re.sub(r'[^0-9.]', '', str(item.get('الكمية بالوحدة الكبيرة', 1)))
+                            qty_large = float(raw_qty_large) if raw_qty_large else 1
+                            
+                            small_unit = str(item.get('الوحدة الصغيرة', 'علبة')).strip()
+                            large_unit = str(item.get('الوحدة الكبيرة', 'كرتون')).strip()
+                            item['معامل التحويل'] = f"{int(qty_large)} {small_unit} / {large_unit}"
+                            
+                            # 2. الفلتر الذكي لتحويل الجرام إلى كيلو والملليلتر إلى لتر
+                            w_unit = str(item.get('وحدة الوزن الصغيرة', '')).strip()
+                            
+                            # استخراج الرقم الصغير بأمان
+                            small_val_raw = str(item.get('الكمية بالوحدة الصغيرة', 0)).replace(',', '')
+                            matches = re.findall(r'[0-9.]+', small_val_raw)
+                            small_val = float(matches[0]) if matches else 0
+                            
+                            if w_unit in ['جرام', 'جم', 'غرام', 'g', 'gram']:
+                                new_val = small_val / 1000
+                                item['وزن الوحدة الصغيرة (كجم)'] = int(new_val) if new_val.is_integer() else new_val
+                            elif w_unit in ['مل', 'ملي', 'مليلتر', 'ml']:
+                                new_val = small_val / 1000
+                                item['وزن الوحدة الصغيرة (كجم)'] = int(new_val) if new_val.is_integer() else new_val
+                            else:
+                                item['وزن الوحدة الصغيرة (كجم)'] = int(small_val) if small_val.is_integer() else small_val
+
+                            # 3. تنظيف اسم المنتج
+                            item['اسم الصنف'] = re.sub(r'\d+[\*×]\d+.*|[\d\.]+\s*(جرام|جم|كجم|كيلو|لتر|مل)', '', str(item.get('اسم الصنف', item.get('المادة/اسم المنتج', '')))).strip()
+                        except: continue
                         
                     all_extracted_data.extend(items)
 
                 if all_extracted_data:
                     df = pd.DataFrame(all_extracted_data)
-                    if '#' in chosen_cols: df['#'] = range(1, len(df) + 1)
                     
-                    # الفلترة النهائية بناء على اختيار المستخدم المنظف
-                    final_df = df[[c for c in chosen_cols if c in df.columns]]
+                    # إنشاء عمود الترقيم التلقائي
+                    if '#' in chosen_cols:
+                        df['#'] = range(1, len(df) + 1)
+                        
+                    # ترتيب الأعمدة لتطابق الترتيب الذي اختاره المستخدم (مطابق للإكسل)
+                    final_cols = [c for c in chosen_cols if c in df.columns]
+                    df = df[final_cols]
                     
-                    st.success("✅ تم تنظيف الأعمدة وحقن بيانات المورد بنجاح!")
-                    st.dataframe(final_df, use_container_width=True)
+                    st.success("✅ اكتمل الاستخراج! تم مطابقة وترتيب الأعمدة مع نموذج الإكسل باحترافية.")
+                    st.dataframe(df, use_container_width=True)
                     
                     out = io.BytesIO()
                     with pd.ExcelWriter(out, engine='xlsxwriter') as wr:
-                        final_df.to_excel(wr, index=False, sheet_name='Azwad_Report')
-                        wr.sheets['Azwad_Report'].right_to_left()
-                    st.download_button("⬇️ تحميل التقرير النهائي المنظف", out.getvalue(), "Azwad_Clean_Report.xlsx")
+                        df.to_excel(wr, index=False, sheet_name='أزواد Master')
+                        wr.sheets['أزواد Master'].right_to_left()
+                    st.download_button("⬇️ تحميل ملف الاكسل", out.getvalue(), "Azwad_Master_Report.xlsx")
             except Exception as e:
                 st.error(f"حدث خطأ: {e}")

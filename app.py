@@ -68,7 +68,6 @@ with st.container():
     
     st.markdown("### ⚙️ اختر الأعمدة (الافتراضي يطابق الإكسل بدقة):")
     
-    # تم تغيير "البيان الاصلي" إلى "ملاحظات"
     excel_cols = [
         '#', 'اسم الصنف', 'التصنيف', 'رمز المادة', 'سعر المادة (ر.س)', 
         'الوحدة الكبيرة', 'الوحدة الصغيرة', 'وزن الوحدة الصغيرة (كجم)', 
@@ -103,7 +102,7 @@ if submit and (files_input or (selection == "رابط درايف المباشر"
         for f in input_list: final_files.append({"name": f.name, "content": f.read(), "type": f.type})
 
     if final_files:
-        with st.spinner("جاري تحليل البيانات واستخراج الملاحظات لكل صنف..."):
+        with st.spinner("جاري تحليل البيانات وتجهيز الأرقام الصافية للنظام..."):
             try:
                 models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
                 target_m = next((m for m in models if "1.5" in m or "flash" in m), models[0])
@@ -116,7 +115,6 @@ if submit and (files_input or (selection == "رابط درايف المباشر"
                         b = io.BytesIO(); p[0].save(b, format='PNG'); payload = b.getvalue()
                     else: payload = compress_image(f_item["content"])
 
-                    # قالب JSON الصارم لضمان عدم وجود بيانات فارغة
                     prompt = f"""
                     أنت محاسب مستودعات دقيق. استخرج البيانات بصيغة JSON فقط.
                     يجب أن يكون الإخراج مطابقاً لهذا الهيكل (Template) حرفياً، لا تضف أي مفاتيح فرعية أو مجلدات:
@@ -149,10 +147,11 @@ if submit and (files_input or (selection == "رابط درايف المباشر"
 
                     قواعد هامة:
                     1. 'ملاحظات': قم بدمج محتوى السطر الأصلي للصنف من الفاتورة بنفس ترتيب الأعمدة المكتوب في الفاتورة تماماً، وافصل بين كل عمود وعمود بعلامة شرطة ( - ). مثال: "رقم الصنف : 00098 - المادة : ورق عنب - الوحدة : كرتون - الكمية : 50".
-                    2. 'الوحدة الصغيرة': الأصل "علبة" للجامد و"جالون" للسوائل ما لم يذكر غير ذلك.
+                    2. 'الوحدة الصغيرة': الأصل "علبة" للجامد و"جالون" للسوائل ما لم يذكر غير ذلك. يُمنع كتابة (جرام، كجم، لتر، مل) هنا.
                     3. 'التصنيف': كلمة واحدة فقط.
-                    4. 'الكمية بالوحدة الكبيرة': الرقم الأول في التعبئة. 'الكمية بالوحدة الصغيرة': الرقم الثاني في التعبئة. 'وحدة الوزن الصغيرة': جرام، كيلو، لتر، الخ.
+                    4. 'الكمية بالوحدة الكبيرة': الرقم الأول في التعبئة. 'الكمية بالوحدة الصغيرة': الرقم الثاني في التعبئة.
                     5. 'اسم الصنف': بدون أوزان أو أرقام تعبئة.
+                    6. 'سعر المادة (ر.س)': اكتب السعر كرقم صافي فقط بدون أي نصوص أو حروف.
                     """
                     
                     response = model.generate_content([prompt, {"mime_type": "image/jpeg", "data": payload}])
@@ -161,7 +160,6 @@ if submit and (files_input or (selection == "رابط درايف المباشر"
                     
                     items = data if isinstance(data, list) else data.get('الأصناف', [])
                     
-                    # استخراج بيانات الترويسة
                     general_info = {}
                     if isinstance(data, dict):
                         general_info['اسم الشركة / المورد'] = data.get('اسم الشركة / المورد', '')
@@ -174,29 +172,35 @@ if submit and (files_input or (selection == "رابط درايف المباشر"
                         general_info['تاريخ الفاتورة'] = data.get('تاريخ الفاتورة', '')
                     
                     for item in items:
-                        # حقن بيانات الترويسة في كل سطر
                         for k, v in general_info.items():
                             if k not in item or not str(item.get(k, '')).strip():
                                 item[k] = v
                                 
-                        # حساب معامل التحويل بطريقة محمية
+                        w_unit = str(item.get('وحدة الوزن الصغيرة', '')).strip().lower()
+                        s_unit = str(item.get('الوحدة الصغيرة', '')).strip().lower()
+                        
+                        weight_keywords = ['جرام', 'جم', 'غرام', 'g', 'gram', 'مل', 'ملي', 'مليلتر', 'ml']
+                        if not w_unit and any(x in s_unit for x in weight_keywords + ['لتر', 'كيلو', 'كجم']):
+                            w_unit = s_unit
+                            item['الوحدة الصغيرة'] = 'علبة'
+                            s_unit = 'علبة'
+
+                        # ---------- التعديل الجوهري هنا (رقم صافي لمعامل التحويل) ----------
                         try:
                             raw_qty_large = re.sub(r'[^0-9.]', '', str(item.get('الكمية بالوحدة الكبيرة', 1)))
                             qty_large = float(raw_qty_large) if raw_qty_large else 1
-                            small_unit = str(item.get('الوحدة الصغيرة', 'علبة')).strip()
-                            large_unit = str(item.get('الوحدة الكبيرة', 'كرتون')).strip()
-                            item['معامل التحويل'] = f"{int(qty_large)} {small_unit} / {large_unit}"
+                            # طباعة الرقم صافي بدون أي نصوص
+                            item['معامل التحويل'] = int(qty_large) if qty_large.is_integer() else qty_large
                         except:
-                            item['معامل التحويل'] = "1"
+                            item['معامل التحويل'] = 1
+                        # -----------------------------------------------------------------
 
-                        # تحويل الأوزان بطريقة محمية
                         try:
-                            w_unit = str(item.get('وحدة الوزن الصغيرة', '')).strip().lower()
                             small_val_raw = str(item.get('الكمية بالوحدة الصغيرة', 0)).replace(',', '')
                             matches = re.findall(r'[0-9.]+', small_val_raw)
                             small_val = float(matches[0]) if matches else 0
                             
-                            if any(x in w_unit for x in ['جرام', 'جم', 'غرام', 'g', 'gram', 'مل', 'ملي', 'مليلتر', 'ml']):
+                            if any(x in w_unit for x in weight_keywords):
                                 new_val = small_val / 1000
                                 item['وزن الوحدة الصغيرة (كجم)'] = int(new_val) if new_val.is_integer() else new_val
                             else:
@@ -204,7 +208,13 @@ if submit and (files_input or (selection == "رابط درايف المباشر"
                         except:
                             item['وزن الوحدة الصغيرة (كجم)'] = ""
 
-                        # تنظيف اسم الصنف بطريقة محمية
+                        # تنظيف السعر ليكون رقماً صافياً
+                        try:
+                            raw_price = re.sub(r'[^0-9.]', '', str(item.get('سعر المادة (ر.س)', '')))
+                            price_val = float(raw_price) if raw_price else ""
+                            item['سعر المادة (ر.س)'] = int(price_val) if isinstance(price_val, float) and price_val.is_integer() else price_val
+                        except: pass
+
                         try:
                             item['اسم الصنف'] = re.sub(r'\d+[\*×]\d+.*|[\d\.]+\s*(جرام|جم|كجم|كيلو|لتر|مل)', '', str(item.get('اسم الصنف', ''))).strip()
                         except: pass
@@ -214,19 +224,16 @@ if submit and (files_input or (selection == "رابط درايف المباشر"
                 if all_extracted_data:
                     df = pd.DataFrame(all_extracted_data)
                     
-                    # إنشاء عمود الترقيم التلقائي
                     if '#' in chosen_cols:
                         df['#'] = range(1, len(df) + 1)
                         
-                    # ضمان وجود كل الأعمدة المختارة في الجدول النهائي
                     for c in chosen_cols:
                         if c not in df.columns:
                             df[c] = ""
                             
-                    # الفلترة والترتيب النهائي
                     final_df = df[chosen_cols]
                     
-                    st.success("✅ اكتمل الاستخراج بنجاح! تم اعتماد عمود 'ملاحظات' وترتيب الأعمدة بدقة.")
+                    st.success("✅ تم تصدير البيانات بنجاح! جميع الأرقام الآن صافية ومتوافقة مع نظام الاستيراد (ERP).")
                     st.dataframe(final_df, use_container_width=True)
                     
                     out = io.BytesIO()

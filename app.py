@@ -66,9 +66,9 @@ with st.container():
 
     st.markdown("---")
     
-    st.markdown("### ⚙️ اختر الأعمدة (تم تثبيت الترتيب والبيانات المطلوبة):")
+    st.markdown("### ⚙️ اختر الأعمدة (تم تنظيف التكرارات ومطابقة الإكسل 100%):")
     
-    # الأعمدة الجديدة المطابقة للإكسل بالضبط
+    # القائمة النهائية المطابقة لملف الإكسل تماماً (بدون أي أعمدة إضافية تسبب زحمة)
     excel_cols = [
         '#', 'اسم الصنف', 'التصنيف', 'رمز المادة', 'سعر المادة (ر.س)', 
         'اسم الشركة / المورد', 'الرقم الضريبي', 'رقم السجل التجاري', 
@@ -77,20 +77,10 @@ with st.container():
         'وزن الوحدة الصغيرة (كجم)'
     ]
     
-    # الأعمدة الإضافية في حال رغبتم في إظهارها من جديد لاحقاً
-    extra_cols = [
-        'الكمية المطلوبة', 'الكمية بالوحدة الكبيرة', 'الكمية بالوحدة الصغيرة', 
-        'وحدة الوزن الصغيرة', 'رقم الفاتورة / عرض السعر', 'البيان الأصلي', 
-        'الضريبة', 'الإجمالي الصافي'
-    ]
-    
-    all_final_cols = excel_cols + extra_cols
-    default_on = excel_cols.copy() # الافتراضي سيكون فقط المطابق للإكسل!
-    
     chosen_cols = st.multiselect(
         "رتب الأعمدة بسحبها أو اختيارها بالترتيب المطلوب:", 
-        options=all_final_cols, 
-        default=default_on
+        options=excel_cols, 
+        default=excel_cols
     )
 
     st.markdown("<br>", unsafe_allow_html=True)
@@ -108,7 +98,7 @@ if submit and (files_input or (selection == "رابط درايف المباشر"
         for f in input_list: final_files.append({"name": f.name, "content": f.read(), "type": f.type})
 
     if final_files:
-        with st.spinner("جاري تحليل البيانات ومطابقتها مع نموذج الإكسل الجديد..."):
+        with st.spinner("جاري تحليل البيانات ومعالجة الحسابات في الخلفية..."):
             try:
                 models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
                 target_m = next((m for m in models if "1.5" in m or "flash" in m), models[0])
@@ -121,33 +111,29 @@ if submit and (files_input or (selection == "رابط درايف المباشر"
                         b = io.BytesIO(); p[0].save(b, format='PNG'); payload = b.getvalue()
                     else: payload = compress_image(f_item["content"])
 
-                    # استبعاد عمود الترقيم التلقائي من البرومبت ليتم إنشاؤه برمجياً
-                    prompt_cols = [c for c in chosen_cols if c != '#']
-                    
                     prompt = f"""
                     أنت محاسب مستودعات دقيق. استخرج البيانات بصيغة JSON.
-                    يجب أن يحتوي الـ JSON على المفاتيح العامة (تستخرج مرة واحدة للفاتورة):
-                    "اسم الشركة / المورد" (بالعربي حصراً)، "الرقم الضريبي"، "رقم السجل التجاري"، "رقم الهاتف"، "البريد الإلكتروني"، "عنوان المورد".
                     
-                    ومفتاح "الأصناف" يحتوي على القائمة. استخرج لكل صنف: {', '.join(prompt_cols)}
-                    بالإضافة إلى المفاتيح المساعدة التالية (يجب استخراجها دائماً للحسابات): "الكمية بالوحدة الكبيرة", "الكمية بالوحدة الصغيرة", "وحدة الوزن الصغيرة".
+                    الجزء 1: بيانات المورد (تستخرج مرة واحدة من الترويسة أو الختم):
+                    - "اسم الشركة / المورد" (بالعربي حصراً).
+                    - "الرقم الضريبي".
+                    - "رقم السجل التجاري".
+                    - "رقم الهاتف".
+                    - "البريد الإلكتروني".
+                    - "عنوان المورد".
                     
-                    قواعد تفكيك البيان الأصلي (هام جداً ولا تقبل الخطأ):
-                    1. تحليل التعبئة من البيان (مثال "بديل ليمون 12*1 لتر"):
-                       - 'الكمية بالوحدة الكبيرة': الرقم الأول في التعبئة.
-                       - 'الكمية بالوحدة الصغيرة': الرقم الثاني في التعبئة.
-                       - 'وحدة الوزن الصغيرة': وحدة القياس. (ملاحظة ذكية: اقل وزن هو كيلو او لتر. اذا كان الجرام اكتبه ليتم تحويله).
-                       - 'الوحدة الصغيرة': **الأصل في العبوات هو "علبة" (للأشياء الجامدة)، وللسوائل "جالون"**، إلا إذا نَص البيان صراحة على شيء مختلف.
-                       - 'الوحدة الكبيرة': العبوة الخارجية (مثال: كرتون).
-                    2. إذا كان الصنف وزناً كلياً بدون ضرب (مثل "طحينة 15 كيلو"):
-                       - 'الكمية بالوحدة الكبيرة': 1.
-                       - 'الكمية بالوحدة الصغيرة': 15.
-                       - 'وحدة الوزن الصغيرة': كيلو.
-                       - 'الوحدة الصغيرة': علبة (أو تنكة إذا ذُكرت).
-                    3. 'التصنيف': يجب أن يكون كلمة واحدة فقط لا غير (مثال: معلبات، صوصات، بهارات، زيوت، خدمات). يُمنع كتابة كلمتين.
-                    4. 'اسم الصنف': اسم الصنف نظيف بدون أرقام أو أوزان.
-                    5. 'رمز المادة': رقم الصنف أو كود المادة المكتوب في الفاتورة.
-                    6. 'سعر المادة (ر.س)': السعر الافرادي للصنف.
+                    الجزء 2: قائمة "الأصناف":
+                    لكل صنف، استخرج: "اسم الصنف"، "التصنيف"، "رمز المادة"، "سعر المادة (ر.س)"، "الوحدة الكبيرة"، "الوحدة الصغيرة".
+                    
+                    *مفاتيح مساعدة هامة للعمليات الحسابية (استخرجها لكل صنف):*
+                    - "الكمية بالوحدة الكبيرة": الرقم الأول في التعبئة (مثال: 12 في 12*1).
+                    - "الكمية بالوحدة الصغيرة": الرقم الثاني في التعبئة (مثال: 1 في 12*1).
+                    - "وحدة الوزن الصغيرة": وحدة القياس (جرام، كيلو، لتر، مل).
+                    
+                    قواعد هامة:
+                    1. 'الوحدة الصغيرة': **الأصل في العبوات هو "علبة" (للأشياء الجامدة)، وللسوائل "جالون"**، إلا إذا نَص البيان صراحة على شيء مختلف.
+                    2. 'التصنيف': كلمة واحدة فقط (مثال: معلبات، صوصات، بهارات).
+                    3. 'اسم الصنف': اسم نظيف بدون أرقام التعبئة أو الأوزان.
                     """
                     
                     response = model.generate_content([prompt, {"mime_type": "image/jpeg", "data": payload}])
@@ -156,6 +142,7 @@ if submit and (files_input or (selection == "رابط درايف المباشر"
                     
                     items = data if isinstance(data, list) else data.get('الأصناف', [])
                     
+                    # استخراج بيانات الترويسة
                     general_info = {}
                     if isinstance(data, dict):
                         general_info['اسم الشركة / المورد'] = data.get('اسم الشركة / المورد', data.get('اسم المورد', ''))
@@ -166,37 +153,35 @@ if submit and (files_input or (selection == "رابط درايف المباشر"
                         general_info['عنوان المورد'] = data.get('عنوان المورد', '')
                     
                     for item in items:
+                        # حقن بيانات الترويسة في كل صنف
                         for k, v in general_info.items():
                             if k not in item or not str(item.get(k, '')).strip():
                                 item[k] = v
                                 
                         try:
-                            # 1. تنظيف الرقم الكبير لمعامل التحويل
+                            # حساب معامل التحويل
                             raw_qty_large = re.sub(r'[^0-9.]', '', str(item.get('الكمية بالوحدة الكبيرة', 1)))
                             qty_large = float(raw_qty_large) if raw_qty_large else 1
-                            
                             small_unit = str(item.get('الوحدة الصغيرة', 'علبة')).strip()
                             large_unit = str(item.get('الوحدة الكبيرة', 'كرتون')).strip()
                             item['معامل التحويل'] = f"{int(qty_large)} {small_unit} / {large_unit}"
                             
-                            # 2. الفلتر الذكي لتحويل الجرام إلى كيلو والملليلتر إلى لتر
-                            w_unit = str(item.get('وحدة الوزن الصغيرة', '')).strip()
-                            
-                            # استخراج الرقم الصغير بأمان
+                            # تحويل الوزن (جرام إلى كيلو، ومل إلى لتر)
+                            w_unit = str(item.get('وحدة الوزن الصغيرة', '')).strip().lower()
                             small_val_raw = str(item.get('الكمية بالوحدة الصغيرة', 0)).replace(',', '')
                             matches = re.findall(r'[0-9.]+', small_val_raw)
                             small_val = float(matches[0]) if matches else 0
                             
-                            if w_unit in ['جرام', 'جم', 'غرام', 'g', 'gram']:
+                            if any(x in w_unit for x in ['جرام', 'جم', 'غرام', 'g', 'gram']):
                                 new_val = small_val / 1000
                                 item['وزن الوحدة الصغيرة (كجم)'] = int(new_val) if new_val.is_integer() else new_val
-                            elif w_unit in ['مل', 'ملي', 'مليلتر', 'ml']:
+                            elif any(x in w_unit for x in ['مل', 'ملي', 'مليلتر', 'ml']):
                                 new_val = small_val / 1000
                                 item['وزن الوحدة الصغيرة (كجم)'] = int(new_val) if new_val.is_integer() else new_val
                             else:
                                 item['وزن الوحدة الصغيرة (كجم)'] = int(small_val) if small_val.is_integer() else small_val
 
-                            # 3. تنظيف اسم المنتج
+                            # تنظيف اسم الصنف
                             item['اسم الصنف'] = re.sub(r'\d+[\*×]\d+.*|[\d\.]+\s*(جرام|جم|كجم|كيلو|لتر|مل)', '', str(item.get('اسم الصنف', item.get('المادة/اسم المنتج', '')))).strip()
                         except: continue
                         
@@ -209,17 +194,21 @@ if submit and (files_input or (selection == "رابط درايف المباشر"
                     if '#' in chosen_cols:
                         df['#'] = range(1, len(df) + 1)
                         
-                    # ترتيب الأعمدة لتطابق الترتيب الذي اختاره المستخدم (مطابق للإكسل)
-                    final_cols = [c for c in chosen_cols if c in df.columns]
-                    df = df[final_cols]
+                    # إنشاء أي عمود مفقود لضمان عدم حدوث أخطاء
+                    for c in chosen_cols:
+                        if c not in df.columns:
+                            df[c] = ""
+                            
+                    # الفلترة والترتيب النهائي حسب اختيار المستخدم
+                    final_df = df[chosen_cols]
                     
-                    st.success("✅ اكتمل الاستخراج! تم مطابقة وترتيب الأعمدة مع نموذج الإكسل باحترافية.")
-                    st.dataframe(df, use_container_width=True)
+                    st.success("✅ اكتمل الاستخراج! الترتيب والأعمدة مطابقة لملف الإكسل تماماً، وتم حقن بيانات المورد بنجاح.")
+                    st.dataframe(final_df, use_container_width=True)
                     
                     out = io.BytesIO()
                     with pd.ExcelWriter(out, engine='xlsxwriter') as wr:
-                        df.to_excel(wr, index=False, sheet_name='أزواد Master')
+                        final_df.to_excel(wr, index=False, sheet_name='أزواد Master')
                         wr.sheets['أزواد Master'].right_to_left()
-                    st.download_button("⬇️ تحميل ملف الاكسل", out.getvalue(), "Azwad_Master_Report.xlsx")
+                    st.download_button("⬇️ تحميل تقرير الإكسل", out.getvalue(), "Azwad_Master_Report.xlsx")
             except Exception as e:
                 st.error(f"حدث خطأ: {e}")
